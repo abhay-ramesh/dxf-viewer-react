@@ -1,5 +1,11 @@
-import DxfParser from "dxf-parser";
-import { useEffect, useRef, useState } from "react";
+import DxfParser, {
+  IArcEntity,
+  ICircleEntity,
+  ILineEntity,
+  IPolylineEntity,
+  ISplineEntity,
+} from "dxf-parser";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
 import {
@@ -9,7 +15,29 @@ import {
   processPolyline,
   processSpline,
 } from "./processors";
-import { DxfViewerProps, EntityStats } from "./types";
+import { DxfViewerProps } from "./types";
+
+// Reusable constants and geometries
+const CAMERA_FOV = 45;
+const CAMERA_NEAR = 0.1;
+const CAMERA_FAR = 10000;
+const INITIAL_CAMERA_POSITION = new THREE.Vector3(0, 0, 100);
+const GRID_SIZE = 1000;
+const GRID_DIVISIONS = 100;
+const AXES_SIZE = 500;
+
+const gridGeometry = new THREE.PlaneGeometry(
+  GRID_SIZE,
+  GRID_SIZE,
+  GRID_DIVISIONS,
+  GRID_DIVISIONS
+);
+const gridMaterial = new THREE.MeshBasicMaterial({
+  color: 0x444444,
+  opacity: 0.5,
+  transparent: true,
+  wireframe: true,
+});
 
 export const DxfViewer: React.FC<DxfViewerProps> = ({
   dxfContent,
@@ -32,220 +60,250 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [debugInfo, setDebugInfo] = useState<string>("");
 
-  useEffect(() => {
-    if (!containerRef.current) return;
+  // Parse DXF outside of useEffect
+  const { entities, parseError } = useMemo(() => {
+    try {
+      const dxf = new DxfParser().parseSync(dxfContent);
+      return { entities: dxf?.entities || [], parseError: null };
+    } catch (error) {
+      return { entities: [], parseError: error };
+    }
+  }, [dxfContent]);
 
-    // Initialize Three.js scene
+  // Create material outside of useEffect
+  const material = useMemo(
+    () => new THREE.LineBasicMaterial({ color: entityColor }),
+    [entityColor]
+  );
+
+  // Process entities and create group
+  const { group, stats } = useMemo(() => {
+    const stats: Record<string, number> = {};
+    const objects: THREE.Object3D[] = [];
+    const geometryCache = new Map<string, THREE.BufferGeometry>();
+
+    entities.forEach((entity) => {
+      try {
+        let object: THREE.Object3D | null = null;
+        stats[entity.type] = (stats[entity.type] || 0) + 1;
+
+        const cacheKey = `${entity.type}-${JSON.stringify(entity)}`;
+        let geometry = geometryCache.get(cacheKey);
+
+        if (!geometry) {
+          switch (entity.type) {
+            case "LINE":
+              object = processLine(entity as ILineEntity, material);
+              break;
+            case "ARC":
+              object = processArc(entity as IArcEntity, material);
+              break;
+            case "CIRCLE":
+              object = processCircle(entity as ICircleEntity, material);
+              break;
+            case "LWPOLYLINE":
+            case "POLYLINE":
+              object = processPolyline(entity as IPolylineEntity, material);
+              break;
+            case "SPLINE":
+              object = processSpline(entity as ISplineEntity, material);
+              break;
+          }
+
+          if (object instanceof THREE.Line) {
+            geometry = object.geometry;
+            if (geometry) geometryCache.set(cacheKey, geometry);
+          }
+        }
+
+        if (geometry) {
+          object = new THREE.Line(geometry, material);
+        }
+
+        if (object) objects.push(object);
+      } catch (err) {
+        console.error("Failed to process entity:", entity.type, err);
+      }
+    });
+
+    const group = new THREE.Group();
+    objects.forEach((obj) => group.add(obj));
+    geometryCache.clear();
+
+    return { group, stats };
+  }, [entities, material]);
+
+  // Calculate camera position and box
+  const { cameraPosition, center, distance } = useMemo(() => {
+    const box = new THREE.Box3().setFromObject(group);
+    if (box.isEmpty()) {
+      return {
+        cameraPosition: INITIAL_CAMERA_POSITION.clone(),
+        center: new THREE.Vector3(),
+        distance: 100,
+      };
+    }
+
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const distance = maxDim * 1.5;
+    const cameraPosition = new THREE.Vector3(
+      center.x + distance * 0.5,
+      center.y - distance * 0.5,
+      center.z + distance * 0.5
+    );
+
+    return { cameraPosition, center, distance };
+  }, [group]);
+
+  // Create scene with helpers
+  const scene = useMemo(() => {
     const scene = new THREE.Scene();
-    sceneRef.current = scene;
     scene.background = new THREE.Color(backgroundColor);
 
-    // Camera setup with better initial parameters
+    if (showGrid) {
+      const grid = new THREE.Mesh(gridGeometry, gridMaterial);
+      grid.rotation.x = -Math.PI / 2;
+      scene.add(grid);
+    }
+
+    if (showAxes) {
+      const axesHelper = new THREE.AxesHelper(AXES_SIZE);
+      scene.add(axesHelper);
+    }
+
+    scene.add(group);
+    return scene;
+  }, [backgroundColor, showGrid, showAxes, group]);
+
+  // Handle resize with debouncing
+  const handleResize = useCallback(() => {
+    if (!containerRef.current || !rendererRef.current || !cameraRef.current)
+      return;
+
+    const width = containerRef.current.clientWidth;
+    const height = containerRef.current.clientHeight;
+
+    cameraRef.current.aspect = width / height;
+    cameraRef.current.updateProjectionMatrix();
+    rendererRef.current.setSize(width, height);
+  }, []);
+
+  // Update debug info
+  useEffect(() => {
+    if (showDebugInfo) {
+      const statsText = Object.entries(stats)
+        .map(([type, count]) => `${type}: ${count}`)
+        .join("\n");
+      setDebugInfo(`Total entities: ${entities.length}\n${statsText}`);
+    }
+  }, [showDebugInfo, stats, entities.length]);
+
+  // Main setup effect
+  useEffect(() => {
+    if (!containerRef.current) return;
+    if (parseError) {
+      setError(
+        parseError instanceof Error ? parseError.message : "Failed to parse DXF"
+      );
+      onError?.(
+        parseError instanceof Error
+          ? parseError
+          : new Error("Failed to parse DXF")
+      );
+      return;
+    }
+    if (entities.length === 0) {
+      setError("No entities found in DXF file");
+      onError?.(new Error("No entities found in DXF file"));
+      return;
+    }
+
+    // Camera setup
     const camera = new THREE.PerspectiveCamera(
-      45, // FOV
+      CAMERA_FOV,
       containerRef.current.clientWidth / containerRef.current.clientHeight,
-      0.1,
-      10000 // Increased far plane for better visibility
+      CAMERA_NEAR,
+      CAMERA_FAR
     );
+    camera.position.copy(cameraPosition);
     cameraRef.current = camera;
 
     // Renderer setup
     const renderer = new THREE.WebGLRenderer({
       antialias: true,
-      alpha: true,
+      powerPreference: "high-performance",
+      precision: "mediump",
     });
-    rendererRef.current = renderer;
-
-    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(
       containerRef.current.clientWidth,
       containerRef.current.clientHeight
     );
+    rendererRef.current = renderer;
     containerRef.current.appendChild(renderer.domElement);
-
-    // Initial camera position
-    camera.position.set(0, 0, 100); // Simple initial position
-    camera.lookAt(0, 0, 0);
 
     // Controls setup
     const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = false;
+    controls.enableZoom = true;
+    controls.zoomSpeed = 0.85;
+    controls.rotateSpeed = 0.85;
+    controls.panSpeed = 0.85;
+    controls.target.copy(center);
     controlsRef.current = controls;
 
-    // Configure controls - simplified
-    controls.enableDamping = false; // Disable damping for direct response
-    controls.screenSpacePanning = true;
-    controls.enableRotate = true;
-    controls.rotateSpeed = 1.0;
-    controls.zoomSpeed = 1.2;
-    controls.panSpeed = 1.0;
-    controls.mouseButtons = {
-      LEFT: THREE.MOUSE.ROTATE,
-      MIDDLE: THREE.MOUSE.DOLLY,
-      RIGHT: THREE.MOUSE.PAN,
-    };
+    sceneRef.current = scene;
 
-    // Grid and Axes
-    if (showGrid) {
-      const gridHelper = new THREE.GridHelper(1000, 100, 0x888888, 0xcccccc);
-      scene.add(gridHelper);
-    }
-
-    if (showAxes) {
-      const axesHelper = new THREE.AxesHelper(500);
-      scene.add(axesHelper);
-    }
-
-    // Process DXF
-    try {
-      const parser = new DxfParser();
-      const dxf = parser.parseSync(dxfContent);
-      const stats: EntityStats = {};
-
-      if (dxf?.entities?.length > 0) {
-        const material = new THREE.LineBasicMaterial({
-          color: entityColor,
-          linewidth: 1,
-          linecap: "round",
-          linejoin: "round",
-        });
-
-        // Process entities
-        dxf.entities.forEach((entity) => {
-          try {
-            let object: THREE.Object3D | null = null;
-            stats[entity.type] = (stats[entity.type] || 0) + 1;
-
-            switch (entity.type) {
-              case "LINE":
-                object = processLine(entity, material);
-                break;
-              case "ARC":
-                object = processArc(entity, material);
-                break;
-              case "CIRCLE":
-                object = processCircle(entity, material);
-                break;
-              case "LWPOLYLINE":
-              case "POLYLINE":
-                object = processPolyline(entity, material);
-                break;
-              case "SPLINE":
-                object = processSpline(entity, material);
-                break;
-              default:
-                console.log("Unsupported entity type:", entity.type);
-            }
-
-            if (object) {
-              scene.add(object);
-            }
-          } catch (entityError) {
-            console.error("Error processing entity:", entity, entityError);
-          }
-        });
-
-        onLoad?.(stats);
-
-        // Update debug info
-        if (showDebugInfo) {
-          const statsText = Object.entries(stats)
-            .map(([type, count]) => `${type}: ${count}`)
-            .join("\n");
-          setDebugInfo(`Total entities: ${dxf.entities.length}\n${statsText}`);
-        }
-
-        // Center and zoom camera to fit the model
-        const box = new THREE.Box3().setFromObject(scene);
-        if (!box.isEmpty()) {
-          const center = box.getCenter(new THREE.Vector3());
-          const size = box.getSize(new THREE.Vector3());
-          const maxDim = Math.max(size.x, size.y, size.z);
-
-          // Simple camera positioning
-          camera.position.set(
-            center.x,
-            center.y - maxDim * 2,
-            center.z + maxDim * 2
-          );
-          camera.lookAt(center);
-          controls.target.copy(center);
-
-          if (showDebugInfo) {
-            setDebugInfo(
-              (prev) =>
-                `${prev}\n\nModel dimensions:\nX: ${size.x.toFixed(
-                  2
-                )}\nY: ${size.y.toFixed(2)}\nZ: ${size.z.toFixed(2)}`
-            );
-          }
-        } else if (showDebugInfo) {
-          setDebugInfo((prev) => `${prev}\nWarning: No visible geometry found`);
-        }
-      } else {
-        const error = new Error("No entities found in DXF file");
-        setError(error.message);
-        onError?.(error);
-      }
-    } catch (error) {
-      const err = error instanceof Error ? error : new Error("Unknown error");
-      console.error("Error parsing DXF:", err);
-      setError(err.message);
-      onError?.(err);
-    }
+    // Update stats
+    onLoad?.(stats);
 
     // Animation loop
     const animate = () => {
-      if (controlsRef.current) {
-        controlsRef.current.update();
-      }
-      if (rendererRef.current && sceneRef.current && cameraRef.current) {
-        rendererRef.current.render(sceneRef.current, cameraRef.current);
-      }
       animationFrameRef.current = requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
     };
     animate();
 
-    // Handle window resize
-    const handleResize = () => {
-      if (!containerRef.current || !cameraRef.current || !rendererRef.current)
-        return;
-
-      const width = containerRef.current.clientWidth;
-      const height = containerRef.current.clientHeight;
-
-      cameraRef.current.aspect = width / height;
-      cameraRef.current.updateProjectionMatrix();
-
-      rendererRef.current.setSize(width, height);
-      rendererRef.current.setPixelRatio(window.devicePixelRatio);
+    // Resize handler
+    let resizeTimeout: ReturnType<typeof setTimeout>;
+    const debouncedResize = () => {
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(handleResize, 100);
     };
-    window.addEventListener("resize", handleResize);
+    window.addEventListener("resize", debouncedResize);
 
-    // Cleanup
     return () => {
-      window.removeEventListener("resize", handleResize);
+      window.removeEventListener("resize", debouncedResize);
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
       }
-      if (controlsRef.current) {
-        controlsRef.current.dispose();
-      }
-      if (rendererRef.current) {
-        rendererRef.current.dispose();
-      }
-      if (containerRef.current && rendererRef.current) {
-        containerRef.current.removeChild(rendererRef.current.domElement);
+
+      renderer.dispose();
+      material.dispose();
+      group.traverse((obj) => {
+        if (obj instanceof THREE.Line) {
+          obj.geometry.dispose();
+        }
+      });
+
+      if (containerRef.current) {
+        containerRef.current.removeChild(renderer.domElement);
       }
     };
   }, [
-    dxfContent,
-    backgroundColor,
-    entityColor,
-    showGrid,
-    showAxes,
-    showDebugInfo,
+    entities,
+    parseError,
+    scene,
+    stats,
     onLoad,
     onError,
+    handleResize,
+    material,
+    cameraPosition,
+    center,
   ]);
 
   return (
@@ -281,9 +339,6 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
           }}
         >
           {debugInfo}
-          <div style={{ marginTop: "0.5rem", fontSize: "10px", opacity: 0.8 }}>
-            Mouse: Left = Rotate, Right = Pan, Wheel = Zoom
-          </div>
         </div>
       )}
     </div>
