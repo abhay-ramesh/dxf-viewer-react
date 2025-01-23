@@ -95,13 +95,120 @@ export const processSpline = (
 ): THREE.Object3D | null => {
   if (!entity.controlPoints?.length) return null;
 
-  const points: THREE.Vector3[] = [];
-  entity.controlPoints.forEach((point) => {
-    points.push(new THREE.Vector3(point.x, point.y, point.z || 0));
-  });
+  // Get spline parameters
+  const controlPoints = entity.controlPoints;
+  const degree = entity.degreeOfSplineCurve || 3;
+  const knots = entity.knotValues || [];
+  const closed = Boolean((entity as { closed?: boolean }).closed);
 
-  const curve = new THREE.CatmullRomCurve3(points);
-  const curvePoints = curve.getPoints(50 * points.length);
-  const geometry = new THREE.BufferGeometry().setFromPoints(curvePoints);
+  // Basic validation
+  if (!controlPoints.length || !knots.length) return null;
+
+  // Find valid parameter range
+  const tMin = knots[degree] ?? knots[0] ?? 0;
+  const tMax = knots[knots.length - degree - 1] ?? knots[knots.length - 1] ?? 1;
+
+  if (tMin >= tMax) return null;
+
+  // Generate points using De Boor's algorithm
+  const numPoints = Math.max(200, controlPoints.length * 20);
+  const dt = (tMax - tMin) / (numPoints - 1);
+  const points: THREE.Vector3[] = [];
+
+  for (let i = 0; i <= numPoints; i++) {
+    const t = tMin + i * dt;
+    const point = evaluatePoint(t, controlPoints, degree, knots);
+    if (point) {
+      points.push(new THREE.Vector3(point.x, point.y, point.z || 0));
+    }
+  }
+
+  // Handle closed splines
+  if (closed && points.length > 0) {
+    points.push(points[0].clone());
+  }
+
+  // Create geometry
+  const geometry = new THREE.BufferGeometry().setFromPoints(points);
   return new THREE.Line(geometry, material);
 };
+
+/**
+ * Evaluate a point on the B-spline curve using De Boor's algorithm.
+ */
+function evaluatePoint(
+  t: number,
+  controlPoints: { x: number; y: number; z?: number }[],
+  degree: number,
+  knots: number[]
+): { x: number; y: number; z?: number } | null {
+  // Basic validation
+  if (!controlPoints.length || !knots.length || degree < 1) return null;
+
+  // Clamp t to valid range
+  const t0 = knots[0] ?? 0;
+  const tEnd = knots[knots.length - 1] ?? 0;
+  t = Math.max(t0, Math.min(t, tEnd));
+
+  // Find knot span
+  let span = -1;
+  for (let i = degree; i <= knots.length - degree - 2; i++) {
+    const k1 = knots[i];
+    const k2 = knots[i + 1];
+    if (k1 !== undefined && k2 !== undefined && t >= k1 && t < k2) {
+      span = i;
+      break;
+    }
+  }
+
+  // Handle end case
+  if (t === tEnd) {
+    span = knots.length - degree - 2;
+  }
+
+  // Validate span
+  if (span < degree || span > controlPoints.length - 1) return null;
+
+  // Initialize points array for De Boor's algorithm
+  const points: Array<Array<{ x: number; y: number; z: number }>> = Array(
+    degree + 1
+  )
+    .fill(null)
+    .map(() => []);
+
+  // Load initial points
+  for (let i = 0; i <= degree; i++) {
+    const idx = span - degree + i;
+    if (idx < 0 || idx >= controlPoints.length) continue;
+    const cp = controlPoints[idx];
+    points[0][i] = { x: cp.x, y: cp.y, z: cp.z || 0 };
+  }
+
+  // Perform De Boor's algorithm
+  for (let r = 1; r <= degree; r++) {
+    for (let i = 0; i <= degree - r; i++) {
+      const k1 = knots[span + 1 + i];
+      const k2 = knots[span - degree + i + r];
+      if (k1 === undefined || k2 === undefined) continue;
+
+      const alphaDenom = k1 - k2;
+      if (Math.abs(alphaDenom) < 1e-10) {
+        points[r][i] = { ...points[r - 1][i] };
+        continue;
+      }
+
+      const alpha = (t - k2) / alphaDenom;
+      const p1 = points[r - 1][i];
+      const p2 = points[r - 1][i + 1];
+      if (!p1 || !p2) continue;
+
+      points[r][i] = {
+        x: (1 - alpha) * p1.x + alpha * p2.x,
+        y: (1 - alpha) * p1.y + alpha * p2.y,
+        z: (1 - alpha) * p1.z + alpha * p2.z,
+      };
+    }
+  }
+
+  return points[degree][0] || null;
+}
