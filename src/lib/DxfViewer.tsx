@@ -24,7 +24,11 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
   onError,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
+  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const sceneRef = useRef<THREE.Scene | null>(null);
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
+  const animationFrameRef = useRef<number>();
   const [error, setError] = useState<string | null>(null);
   const [debugInfo, setDebugInfo] = useState<string>("");
 
@@ -33,20 +37,24 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
 
     // Initialize Three.js scene
     const scene = new THREE.Scene();
+    sceneRef.current = scene;
     scene.background = new THREE.Color(backgroundColor);
 
+    // Camera setup with better initial parameters
     const camera = new THREE.PerspectiveCamera(
-      45,
+      45, // FOV
       containerRef.current.clientWidth / containerRef.current.clientHeight,
       0.1,
-      10000
+      10000 // Increased far plane for better visibility
     );
+    cameraRef.current = camera;
 
+    // Renderer setup
     const renderer = new THREE.WebGLRenderer({
       antialias: true,
       alpha: true,
-      preserveDrawingBuffer: true,
     });
+    rendererRef.current = renderer;
 
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.setSize(
@@ -55,46 +63,39 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
     );
     containerRef.current.appendChild(renderer.domElement);
 
-    // Set up camera and controls
-    camera.position.set(0, 0, 10);
+    // Initial camera position
+    camera.position.set(0, 0, 100); // Simple initial position
+    camera.lookAt(0, 0, 0);
+
+    // Controls setup
     const controls = new OrbitControls(camera, renderer.domElement);
     controlsRef.current = controls;
 
-    // Configure controls for smoother interaction
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.1; // Increased for more stability
+    // Configure controls - simplified
+    controls.enableDamping = false; // Disable damping for direct response
     controls.screenSpacePanning = true;
     controls.enableRotate = true;
-    controls.rotateSpeed = 0.5;
-    controls.zoomSpeed = 0.5; // Reduced for more control
-    controls.panSpeed = 0.5; // Reduced for more control
+    controls.rotateSpeed = 1.0;
+    controls.zoomSpeed = 1.2;
+    controls.panSpeed = 1.0;
     controls.mouseButtons = {
       LEFT: THREE.MOUSE.ROTATE,
       MIDDLE: THREE.MOUSE.DOLLY,
       RIGHT: THREE.MOUSE.PAN,
     };
 
-    // Add key bindings for reset
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "r" || event.key === "R") {
-        if (controlsRef.current) {
-          controlsRef.current.reset();
-        }
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-
+    // Grid and Axes
     if (showGrid) {
-      const gridHelper = new THREE.GridHelper(100, 100, 0x888888, 0xcccccc);
-      gridHelper.position.set(0, 0, 0);
+      const gridHelper = new THREE.GridHelper(1000, 100, 0x888888, 0xcccccc);
       scene.add(gridHelper);
     }
 
     if (showAxes) {
-      const axesHelper = new THREE.AxesHelper(50);
+      const axesHelper = new THREE.AxesHelper(500);
       scene.add(axesHelper);
     }
 
+    // Process DXF
     try {
       const parser = new DxfParser();
       const dxf = parser.parseSync(dxfContent);
@@ -108,6 +109,7 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
           linejoin: "round",
         });
 
+        // Process entities
         dxf.entities.forEach((entity) => {
           try {
             let object: THREE.Object3D | null = null;
@@ -144,6 +146,7 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
 
         onLoad?.(stats);
 
+        // Update debug info
         if (showDebugInfo) {
           const statsText = Object.entries(stats)
             .map(([type, count]) => `${type}: ${count}`)
@@ -157,22 +160,15 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
           const center = box.getCenter(new THREE.Vector3());
           const size = box.getSize(new THREE.Vector3());
           const maxDim = Math.max(size.x, size.y, size.z);
-          const distance = maxDim * 1.5;
 
-          // Position camera to see the entire model
-          camera.position.set(center.x, center.y, center.z + distance);
+          // Simple camera positioning
+          camera.position.set(
+            center.x,
+            center.y - maxDim * 2,
+            center.z + maxDim * 2
+          );
           camera.lookAt(center);
           controls.target.copy(center);
-
-          // Set reasonable zoom limits based on model size
-          const minZoom = maxDim * 0.1;
-          const maxZoom = maxDim * 10;
-
-          controls.minDistance = minZoom;
-          controls.maxDistance = maxZoom;
-
-          // Store initial position for reset
-          controls.saveState();
 
           if (showDebugInfo) {
             setDebugInfo(
@@ -197,45 +193,49 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
       onError?.(err);
     }
 
-    // Smooth animation loop with fixed time step
-    let lastTime = 0;
-    const fixedTimeStep = 1000 / 60; // 60 FPS
-    let animationFrameId: number;
-
-    const animate = (currentTime: number) => {
-      animationFrameId = requestAnimationFrame(animate);
-
-      const deltaTime = currentTime - lastTime;
-      if (deltaTime >= fixedTimeStep) {
-        controls.update();
-        renderer.render(scene, camera);
-        lastTime = currentTime;
+    // Animation loop
+    const animate = () => {
+      if (controlsRef.current) {
+        controlsRef.current.update();
       }
+      if (rendererRef.current && sceneRef.current && cameraRef.current) {
+        rendererRef.current.render(sceneRef.current, cameraRef.current);
+      }
+      animationFrameRef.current = requestAnimationFrame(animate);
     };
-    animate(0);
+    animate();
 
     // Handle window resize
     const handleResize = () => {
-      if (!containerRef.current) return;
+      if (!containerRef.current || !cameraRef.current || !rendererRef.current)
+        return;
+
       const width = containerRef.current.clientWidth;
       const height = containerRef.current.clientHeight;
-      camera.aspect = width / height;
-      camera.updateProjectionMatrix();
-      renderer.setSize(width, height);
-      renderer.setPixelRatio(window.devicePixelRatio);
+
+      cameraRef.current.aspect = width / height;
+      cameraRef.current.updateProjectionMatrix();
+
+      rendererRef.current.setSize(width, height);
+      rendererRef.current.setPixelRatio(window.devicePixelRatio);
     };
     window.addEventListener("resize", handleResize);
 
     // Cleanup
     return () => {
       window.removeEventListener("resize", handleResize);
-      window.removeEventListener("keydown", handleKeyDown);
-      if (containerRef.current) {
-        containerRef.current.removeChild(renderer.domElement);
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
       }
-      cancelAnimationFrame(animationFrameId);
-      renderer.dispose();
-      controls.dispose();
+      if (controlsRef.current) {
+        controlsRef.current.dispose();
+      }
+      if (rendererRef.current) {
+        rendererRef.current.dispose();
+      }
+      if (containerRef.current && rendererRef.current) {
+        containerRef.current.removeChild(rendererRef.current.domElement);
+      }
     };
   }, [
     dxfContent,
@@ -248,14 +248,8 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
     onError,
   ]);
 
-  const containerStyle: React.CSSProperties = {
-    width,
-    height,
-    position: "relative",
-  };
-
   return (
-    <div style={containerStyle}>
+    <div style={{ width, height, position: "relative" }}>
       <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
       {error && (
         <div
@@ -288,7 +282,7 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
         >
           {debugInfo}
           <div style={{ marginTop: "0.5rem", fontSize: "10px", opacity: 0.8 }}>
-            Press 'R' to reset view
+            Mouse: Left = Rotate, Right = Pan, Wheel = Zoom
           </div>
         </div>
       )}
