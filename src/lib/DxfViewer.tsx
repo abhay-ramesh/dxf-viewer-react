@@ -45,6 +45,18 @@ const gridMaterial = new THREE.MeshBasicMaterial({
   wireframe: true,
 });
 
+// Error handling functions
+const handleDxfError = (
+  error: unknown,
+  setError: (msg: string) => void,
+  onError?: (err: Error) => void
+) => {
+  const errorMessage =
+    error instanceof Error ? error.message : "Failed to parse DXF";
+  setError(errorMessage);
+  onError?.(error instanceof Error ? error : new Error(errorMessage));
+};
+
 export const DxfViewer: React.FC<DxfViewerProps> = ({
   dxfContent,
   backgroundColor = 0xf0f0f0,
@@ -149,30 +161,61 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
     return { group, stats };
   }, [entities, material]);
 
-  // Calculate camera position and box
-  const { cameraPosition, center } = useMemo(() => {
-    const box = new THREE.Box3().setFromObject(group);
-    if (box.isEmpty()) {
+  // Camera setup - memoized to avoid recalculation
+  const { camera, cameraPosition, center } = useMemo(() => {
+    if (!containerRef.current) {
       return {
+        camera: null,
         cameraPosition: INITIAL_CAMERA_POSITION.clone(),
         center: new THREE.Vector3(),
       };
     }
 
-    const center = box.getCenter(new THREE.Vector3());
-    const size = box.getSize(new THREE.Vector3());
+    const box = new THREE.Box3().setFromObject(group);
+    const center = box.isEmpty()
+      ? new THREE.Vector3()
+      : box.getCenter(new THREE.Vector3());
+
+    const size = box.isEmpty()
+      ? new THREE.Vector3(100, 100, 100)
+      : box.getSize(new THREE.Vector3());
+
     const maxDim = Math.max(size.x, size.y, size.z);
-    // Position camera directly above the center
     const cameraPosition = new THREE.Vector3(
       center.x,
       center.y,
       center.z + maxDim * 1.5
     );
 
-    return { cameraPosition, center };
-  }, [group]);
+    const camera = new THREE.PerspectiveCamera(
+      CAMERA_FOV,
+      containerRef.current.clientWidth / containerRef.current.clientHeight,
+      CAMERA_NEAR,
+      CAMERA_FAR
+    );
+    camera.position.copy(cameraPosition);
 
-  // Create scene with helpers
+    return { camera, cameraPosition, center };
+  }, [group, containerRef.current]);
+
+  // Renderer setup - memoized to avoid recreation
+  const renderer = useMemo(() => {
+    if (!containerRef.current) return null;
+
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      powerPreference: "high-performance",
+      precision: "mediump",
+    });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(
+      containerRef.current.clientWidth,
+      containerRef.current.clientHeight
+    );
+    return renderer;
+  }, [containerRef.current]);
+
+  // Scene setup - already memoized, but simplified
   const scene = useMemo(() => {
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(backgroundColor);
@@ -192,106 +235,103 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
     return scene;
   }, [backgroundColor, showGrid, showAxes, group]);
 
-  // Handle resize with debouncing
-  const handleResize = useCallback(() => {
-    if (!containerRef.current || !rendererRef.current || !cameraRef.current)
-      return;
+  // Controls setup - memoized to avoid recreation
+  const controls = useMemo(() => {
+    if (!camera || !renderer) return null;
 
-    const width = containerRef.current.clientWidth;
-    const height = containerRef.current.clientHeight;
+    const controls = new OrbitControls(camera, renderer.domElement);
+    const size = new THREE.Box3()
+      .setFromObject(group)
+      .getSize(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
 
-    cameraRef.current.aspect = width / height;
-    cameraRef.current.updateProjectionMatrix();
-    rendererRef.current.setSize(width, height);
+    controls.enableDamping = false;
+    controls.enableZoom = true;
+    controls.enablePan = true;
+    controls.enableRotate = false;
+    controls.zoomSpeed = 1.2;
+    controls.panSpeed = 1.0;
+    controls.mouseButtons = {
+      LEFT: THREE.MOUSE.PAN,
+      MIDDLE: THREE.MOUSE.DOLLY,
+      RIGHT: THREE.MOUSE.ROTATE,
+    };
+    controls.minDistance = maxDim * 0.1;
+    controls.maxDistance = maxDim * 10;
+    controls.screenSpacePanning = true;
+    controls.target.copy(center);
+
+    return controls;
+  }, [camera, renderer, group, center]);
+
+  // Animation frame handler - no change needed, already optimized
+  const animate = useCallback(() => {
+    const camera = cameraRef.current;
+    const renderer = rendererRef.current;
+    const scene = sceneRef.current;
+    const controls = controlsRef.current;
+
+    if (!camera || !renderer || !scene || !controls) return;
+
+    animationFrameRef.current = requestAnimationFrame(animate);
+    controls.update();
+    renderer.render(scene, camera);
   }, []);
 
-  // Update debug info
-  useEffect(() => {
-    if (showDebugInfo) {
-      const statsText = Object.entries(stats)
-        .map(([type, count]) => `${type}: ${count}`)
-        .join("\n");
-      setDebugInfo(`Total entities: ${entities.length}\n${statsText}`);
-    }
-  }, [showDebugInfo, stats, entities.length]);
+  // Resize handler - no change needed, already optimized
+  const handleResize = useCallback(() => {
+    const camera = cameraRef.current;
+    const renderer = rendererRef.current;
+    const container = containerRef.current;
 
-  // Main setup effect
+    if (!container || !renderer || !camera) return;
+
+    const width = container.clientWidth;
+    const height = container.clientHeight;
+
+    camera.aspect = width / height;
+    camera.updateProjectionMatrix();
+    renderer.setSize(width, height);
+  }, []);
+
+  // Main setup effect - now much simpler
   useEffect(() => {
-    if (!containerRef.current) return;
+    if (!containerRef.current || !camera || !renderer || !controls || !scene)
+      return;
+
+    // Handle errors
     if (parseError) {
-      setError(
-        parseError instanceof Error ? parseError.message : "Failed to parse DXF"
-      );
-      onError?.(
-        parseError instanceof Error
-          ? parseError
-          : new Error("Failed to parse DXF")
-      );
+      handleDxfError(parseError, setError, onError);
       return;
     }
     if (entities.length === 0) {
-      setError("No entities found in DXF file");
-      onError?.(new Error("No entities found in DXF file"));
+      handleDxfError(
+        new Error("No entities found in DXF file"),
+        setError,
+        onError
+      );
       return;
     }
 
-    // Camera setup
-    const camera = new THREE.PerspectiveCamera(
-      CAMERA_FOV,
-      containerRef.current.clientWidth / containerRef.current.clientHeight,
-      CAMERA_NEAR,
-      CAMERA_FAR
-    );
-    camera.position.copy(cameraPosition);
-    cameraRef.current = camera;
-
-    // Renderer setup
-    const renderer = new THREE.WebGLRenderer({
-      antialias: true,
-      powerPreference: "high-performance",
-      precision: "mediump",
-    });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.setSize(
-      containerRef.current.clientWidth,
-      containerRef.current.clientHeight
-    );
-    rendererRef.current = renderer;
+    // Mount renderer
     containerRef.current.appendChild(renderer.domElement);
 
-    // Controls setup
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = false;
-    controls.enableZoom = true;
-    controls.zoomSpeed = 0.85;
-    controls.rotateSpeed = 0.85;
-    controls.panSpeed = 0.85;
-    controls.target.copy(center);
+    // Store refs
+    cameraRef.current = camera;
+    rendererRef.current = renderer;
     controlsRef.current = controls;
-
     sceneRef.current = scene;
 
-    // Update stats
+    // Start animation and setup resize handler
+    animate();
+    window.addEventListener("resize", handleResize);
+
+    // Notify load complete
     onLoad?.(stats);
 
-    // Animation loop
-    const animate = () => {
-      animationFrameRef.current = requestAnimationFrame(animate);
-      controls.update();
-      renderer.render(scene, camera);
-    };
-    animate();
-
-    // Resize handler
-    let resizeTimeout: ReturnType<typeof setTimeout>;
-    const debouncedResize = () => {
-      clearTimeout(resizeTimeout);
-      resizeTimeout = setTimeout(handleResize, 100);
-    };
-    window.addEventListener("resize", debouncedResize);
-
+    // Cleanup
     return () => {
-      window.removeEventListener("resize", debouncedResize);
+      window.removeEventListener("resize", handleResize);
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
       }
@@ -309,17 +349,30 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
       }
     };
   }, [
-    entities,
-    parseError,
+    camera,
+    renderer,
+    controls,
     scene,
-    stats,
+    parseError,
+    entities.length,
     onLoad,
     onError,
+    stats,
+    animate,
     handleResize,
     material,
-    cameraPosition,
-    center,
+    group,
   ]);
+
+  // Update debug info - separate effect with proper deps
+  useEffect(() => {
+    if (showDebugInfo) {
+      const statsText = Object.entries(stats)
+        .map(([type, count]) => `${type}: ${count}`)
+        .join("\n");
+      setDebugInfo(`Total entities: ${entities.length}\n${statsText}`);
+    }
+  }, [showDebugInfo, stats, entities.length]);
 
   return (
     <div style={{ width, height, position: "relative" }}>
