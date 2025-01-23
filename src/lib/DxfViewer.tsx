@@ -1,9 +1,12 @@
 import DxfParser, {
   IArcEntity,
   ICircleEntity,
+  IEllipseEntity,
   ILineEntity,
+  IPointEntity,
   IPolylineEntity,
   ISplineEntity,
+  ITextEntity,
 } from "dxf-parser";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
@@ -11,9 +14,12 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
 import {
   processArc,
   processCircle,
+  processEllipse,
   processLine,
+  processPoint,
   processPolyline,
   processSpline,
+  processText,
 } from "./processors";
 import { DxfViewerProps } from "./types";
 
@@ -108,6 +114,16 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
             case "SPLINE":
               object = processSpline(entity as ISplineEntity, material);
               break;
+            case "ELLIPSE":
+              object = processEllipse(entity as IEllipseEntity, material);
+              break;
+            case "POINT":
+              object = processPoint(entity as IPointEntity, material);
+              break;
+            case "TEXT":
+            case "MTEXT":
+              object = processText(entity as ITextEntity, material);
+              break;
           }
 
           if (object instanceof THREE.Line) {
@@ -134,27 +150,26 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
   }, [entities, material]);
 
   // Calculate camera position and box
-  const { cameraPosition, center, distance } = useMemo(() => {
+  const { cameraPosition, center } = useMemo(() => {
     const box = new THREE.Box3().setFromObject(group);
     if (box.isEmpty()) {
       return {
         cameraPosition: INITIAL_CAMERA_POSITION.clone(),
         center: new THREE.Vector3(),
-        distance: 100,
       };
     }
 
     const center = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());
     const maxDim = Math.max(size.x, size.y, size.z);
-    const distance = maxDim * 1.5;
+    // Position camera directly above the center
     const cameraPosition = new THREE.Vector3(
-      center.x + distance * 0.5,
-      center.y - distance * 0.5,
-      center.z + distance * 0.5
+      center.x,
+      center.y,
+      center.z + maxDim * 1.5
     );
 
-    return { cameraPosition, center, distance };
+    return { cameraPosition, center };
   }, [group]);
 
   // Create scene with helpers

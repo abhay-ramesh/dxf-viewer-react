@@ -1,9 +1,12 @@
 import {
   IArcEntity,
   ICircleEntity,
+  IEllipseEntity,
   ILineEntity,
+  IPointEntity,
   IPolylineEntity,
   ISplineEntity,
+  ITextEntity,
 } from "dxf-parser";
 import * as THREE from "three";
 
@@ -212,3 +215,119 @@ function evaluatePoint(
 
   return points[degree][0] || null;
 }
+
+export const processEllipse = (
+  entity: IEllipseEntity,
+  material: THREE.Material
+): THREE.Object3D | null => {
+  if (!entity.center || !entity.majorAxisEndPoint || !entity.axisRatio)
+    return null;
+
+  // Calculate major axis vector and length
+  const dx = entity.majorAxisEndPoint.x - entity.center.x;
+  const dy = entity.majorAxisEndPoint.y - entity.center.y;
+  const majorRadius = Math.sqrt(dx * dx + dy * dy);
+  const minorRadius = majorRadius * entity.axisRatio;
+  const rotation = Math.atan2(dy, dx);
+  const startAngle = entity.startAngle || 0;
+  const endAngle = entity.endAngle || Math.PI * 2;
+
+  // Create ellipse curve
+  const curve = new THREE.EllipseCurve(
+    entity.center.x,
+    entity.center.y,
+    majorRadius,
+    minorRadius,
+    startAngle,
+    endAngle,
+    false,
+    rotation
+  );
+
+  // Generate points with higher resolution for smoother curves
+  const numPoints = Math.max(50, Math.ceil(majorRadius * 2));
+  const points = curve.getPoints(numPoints);
+  const geometry = new THREE.BufferGeometry().setFromPoints(points);
+  return new THREE.Line(geometry, material);
+};
+
+export const processPoint = (
+  entity: IPointEntity,
+  material: THREE.Material
+): THREE.Object3D | null => {
+  if (!entity.position) return null;
+
+  // Create a small cross to represent the point
+  const size = 0.5;
+  const geometry = new THREE.BufferGeometry();
+  const vertices = new Float32Array([
+    // Horizontal line
+    entity.position.x - size,
+    entity.position.y,
+    entity.position.z || 0,
+    entity.position.x + size,
+    entity.position.y,
+    entity.position.z || 0,
+    // Vertical line
+    entity.position.x,
+    entity.position.y - size,
+    entity.position.z || 0,
+    entity.position.x,
+    entity.position.y + size,
+    entity.position.z || 0,
+  ]);
+
+  geometry.setAttribute("position", new THREE.BufferAttribute(vertices, 3));
+  return new THREE.LineSegments(geometry, material);
+};
+
+export const processText = (
+  entity: ITextEntity,
+  material: THREE.Material
+): THREE.Object3D | null => {
+  if (!entity.startPoint) return null;
+
+  const text = entity.text || "";
+  const height = entity.textHeight || 1;
+  const rotation = entity.rotation || 0;
+
+  // Create a simple line box to represent text bounds
+  const width = height * text.length * 0.6; // Approximate width based on height
+  const geometry = new THREE.BufferGeometry();
+  const cos = Math.cos(rotation);
+  const sin = Math.sin(rotation);
+
+  const vertices = new Float32Array([
+    // Bottom line
+    entity.startPoint.x,
+    entity.startPoint.y,
+    entity.startPoint.z || 0,
+    entity.startPoint.x + width * cos,
+    entity.startPoint.y + width * sin,
+    entity.startPoint.z || 0,
+    // Right line
+    entity.startPoint.x + width * cos,
+    entity.startPoint.y + width * sin,
+    entity.startPoint.z || 0,
+    entity.startPoint.x + width * cos - height * sin,
+    entity.startPoint.y + width * sin + height * cos,
+    entity.startPoint.z || 0,
+    // Top line
+    entity.startPoint.x + width * cos - height * sin,
+    entity.startPoint.y + width * sin + height * cos,
+    entity.startPoint.z || 0,
+    entity.startPoint.x - height * sin,
+    entity.startPoint.y + height * cos,
+    entity.startPoint.z || 0,
+    // Left line
+    entity.startPoint.x - height * sin,
+    entity.startPoint.y + height * cos,
+    entity.startPoint.z || 0,
+    entity.startPoint.x,
+    entity.startPoint.y,
+    entity.startPoint.z || 0,
+  ]);
+
+  geometry.setAttribute("position", new THREE.BufferAttribute(vertices, 3));
+  return new THREE.LineSegments(geometry, material);
+};
