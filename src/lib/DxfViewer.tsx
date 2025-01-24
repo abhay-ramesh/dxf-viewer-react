@@ -256,30 +256,66 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
     // Control speeds
     controls.zoomSpeed = 1.2;
     controls.panSpeed = 1.0;
-    controls.rotateSpeed = 0.8; // Increased for better rotation control
+    controls.rotateSpeed = 0.8;
 
-    // Mouse/Trackpad settings
+    // AutoCAD-style mouse controls
     controls.mouseButtons = {
-      LEFT: THREE.MOUSE.PAN, // Pan with left click/one finger drag
-      MIDDLE: THREE.MOUSE.DOLLY, // Zoom with middle click/pinch
-      RIGHT: THREE.MOUSE.ROTATE, // Rotate with right click/two finger drag
+      MIDDLE: THREE.MOUSE.PAN, // Middle mouse button for pan
+      RIGHT: THREE.MOUSE.ROTATE, // Shift + Middle mouse for rotate
+      LEFT: null, // Left mouse reserved for selection/measurement
     };
 
-    // Touch settings for trackpad gestures
+    // AutoCAD-style touch controls
     controls.touches = {
-      ONE: THREE.TOUCH.PAN, // One finger drag to pan
-      TWO: THREE.TOUCH.DOLLY_ROTATE, // Two finger drag to rotate, pinch to zoom
+      TWO: THREE.TOUCH.PAN, // Two finger drag to pan
+      ONE: null, // One finger reserved for selection/measurement
     };
 
-    // Zoom limits
-    controls.minDistance = maxDim * 0.1;
-    controls.maxDistance = maxDim * 10;
+    // Add keyboard modifier for rotation (Shift key)
+    let isShiftDown = false;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Shift") {
+        isShiftDown = true;
+        controls.mouseButtons.MIDDLE = THREE.MOUSE.ROTATE;
+        controls.touches.TWO = THREE.TOUCH.DOLLY_ROTATE;
+      }
+    };
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.key === "Shift") {
+        isShiftDown = false;
+        controls.mouseButtons.MIDDLE = THREE.MOUSE.PAN;
+        controls.touches.TWO = THREE.TOUCH.PAN;
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
 
-    // Remove rotation limits for full rotation
-    controls.minPolarAngle = 0; // Allow full vertical rotation
-    controls.maxPolarAngle = Math.PI;
-    controls.minAzimuthAngle = -Infinity; // Allow full horizontal rotation
-    controls.maxAzimuthAngle = Infinity;
+    // Add mouse wheel zoom
+    const handleWheel = (event: WheelEvent) => {
+      if (!controls.enabled) return;
+
+      event.preventDefault();
+      const delta = -event.deltaY;
+      const zoomScale = 1.1;
+
+      if (delta > 0) {
+        controls.dollyIn(zoomScale);
+      } else {
+        controls.dollyOut(zoomScale);
+      }
+      controls.update();
+    };
+    renderer.domElement.addEventListener("wheel", handleWheel, {
+      passive: false,
+    });
+
+    // Cleanup function to remove event listeners
+    controls.dispose = () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+      renderer.domElement.removeEventListener("wheel", handleWheel);
+      OrbitControls.prototype.dispose.call(controls);
+    };
 
     // Pan settings
     controls.screenSpacePanning = true;
