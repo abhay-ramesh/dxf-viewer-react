@@ -21,15 +21,12 @@ import {
   processSpline,
   processText,
 } from "./processors";
+import { setupCamera } from "./setupCamera";
 import { setupControls } from "./setupControls";
 import { setupScene } from "./setupScene";
 import { DxfViewerProps } from "./types";
 
 // Reusable constants and geometries
-const CAMERA_FOV = 45;
-const CAMERA_NEAR = 0.1;
-const CAMERA_FAR = 10000;
-const INITIAL_CAMERA_POSITION = new THREE.Vector3(0, 0, 100);
 const GRID_SIZE = 1000;
 const GRID_DIVISIONS = 100;
 const AXES_SIZE = 500;
@@ -159,40 +156,19 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
   }, [entities, material]);
 
   // Camera setup - memoized to avoid recalculation
-  const { camera, cameraPosition, center } = useMemo(() => {
+  const { camera, center } = useMemo(() => {
     if (!containerRef.current) {
       return {
         camera: null,
-        cameraPosition: INITIAL_CAMERA_POSITION.clone(),
         center: new THREE.Vector3(),
       };
     }
 
-    const box = new THREE.Box3().setFromObject(group);
-    const center = box.isEmpty()
-      ? new THREE.Vector3()
-      : box.getCenter(new THREE.Vector3());
-
-    const size = box.isEmpty()
-      ? new THREE.Vector3(100, 100, 100)
-      : box.getSize(new THREE.Vector3());
-
-    const maxDim = Math.max(size.x, size.y, size.z);
-    const cameraPosition = new THREE.Vector3(
-      center.x,
-      center.y,
-      center.z + maxDim * 1.5
-    );
-
-    const camera = new THREE.PerspectiveCamera(
-      CAMERA_FOV,
-      containerRef.current.clientWidth / containerRef.current.clientHeight,
-      CAMERA_NEAR,
-      CAMERA_FAR
-    );
-    camera.position.copy(cameraPosition);
-
-    return { camera, cameraPosition, center };
+    return setupCamera({
+      containerWidth: containerRef.current.clientWidth,
+      containerHeight: containerRef.current.clientHeight,
+      group,
+    });
   }, [group, containerRef.current]);
 
   // Renderer setup - memoized to avoid recreation
