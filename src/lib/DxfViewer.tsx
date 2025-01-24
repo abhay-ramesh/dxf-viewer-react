@@ -22,6 +22,7 @@ import {
   processText,
 } from "./processors";
 import { setupControls } from "./setupControls";
+import { setupScene } from "./setupScene";
 import { DxfViewerProps } from "./types";
 
 // Reusable constants and geometries
@@ -213,29 +214,15 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
 
   // Scene setup - already memoized, but simplified
   const scene = useMemo(() => {
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(backgroundColor);
-
-    if (showGrid) {
-      // Create a grid helper instead of plane geometry
-      const grid = new THREE.GridHelper(
-        GRID_SIZE,
-        GRID_DIVISIONS,
-        0x888888, // Main grid lines
-        0x444444 // Secondary grid lines
-      );
-      // Rotate grid to XY plane (default is XZ)
-      grid.rotation.x = Math.PI / 2;
-      scene.add(grid);
-    }
-
-    if (showAxes) {
-      const axesHelper = new THREE.AxesHelper(AXES_SIZE);
-      scene.add(axesHelper);
-    }
-
-    scene.add(group);
-    return scene;
+    return setupScene({
+      backgroundColor,
+      showGrid,
+      showAxes,
+      group,
+      gridSize: GRID_SIZE,
+      gridDivisions: GRID_DIVISIONS,
+      axesSize: AXES_SIZE,
+    });
   }, [backgroundColor, showGrid, showAxes, group]);
 
   // Controls setup - memoized to avoid recreation

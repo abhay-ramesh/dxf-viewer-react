@@ -9,6 +9,13 @@ export function setupControls(
 ) {
   const controls = new OrbitControls(camera, renderer.domElement);
 
+  // Calculate size and max dimension
+  const size = new THREE.Box3()
+    .setFromObject(group)
+    .getSize(new THREE.Vector3());
+  const maxDim = Math.max(size.x, size.y, size.z);
+  // Use maxDim as needed
+
   // Basic settings
   controls.enableDamping = false;
   controls.enableZoom = true;
@@ -20,28 +27,31 @@ export function setupControls(
   controls.panSpeed = 1.0;
   controls.rotateSpeed = 0.8;
 
-  // Default mouse controls (when not measuring)
+  // Mouse buttons configuration
   controls.mouseButtons = {
-    LEFT: THREE.MOUSE.PAN, // Left mouse button for pan
-    MIDDLE: THREE.MOUSE.PAN, // Middle mouse button also for pan
-    RIGHT: THREE.MOUSE.ROTATE, // Right mouse button for rotate
+    LEFT: THREE.MOUSE.PAN,
+    MIDDLE: THREE.MOUSE.PAN,
+    RIGHT: THREE.MOUSE.ROTATE,
   };
 
-  // Touch controls
+  // Touch controls configuration
   controls.touches = {
     ONE: THREE.TOUCH.PAN, // One finger drag to pan
     TWO: THREE.TOUCH.DOLLY_ROTATE, // Two finger drag to rotate/zoom
   };
 
-  // Add keyboard modifier for rotation (Shift key)
+  // Keyboard modifier for rotation (Shift key)
+  let isShiftDown = false;
   const handleKeyDown = (event: KeyboardEvent) => {
     if (event.key === "Shift") {
+      isShiftDown = true;
       controls.mouseButtons.MIDDLE = THREE.MOUSE.ROTATE;
       controls.touches.TWO = THREE.TOUCH.DOLLY_ROTATE;
     }
   };
   const handleKeyUp = (event: KeyboardEvent) => {
     if (event.key === "Shift") {
+      isShiftDown = false;
       controls.mouseButtons.MIDDLE = THREE.MOUSE.PAN;
       controls.touches.TWO = THREE.TOUCH.PAN;
     }
