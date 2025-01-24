@@ -1,0 +1,3 @@
+# Cursor Rules
+
+Make sure you use as less amout of useEffect as possible. and if you do, make sure it runs as less often as possible except for the ones that are necessary.
