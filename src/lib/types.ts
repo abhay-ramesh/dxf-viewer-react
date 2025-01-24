@@ -1,10 +1,9 @@
 import { IEntity } from "dxf-parser";
 import { Color } from "three";
-import { ToolType } from "./tools";
 
 export interface DxfViewerProps {
   /** The DXF file content as a string */
-  dxfContent: string;
+  dxfContent: string | null;
   /** Background color of the viewer (default: #f0f0f0) */
   backgroundColor?: string | number | Color;
   /** Color of the DXF entities (default: #0000ff) */
@@ -19,8 +18,10 @@ export interface DxfViewerProps {
   showAxes?: boolean;
   /** Show debug information overlay (default: false) */
   showDebugInfo?: boolean;
+  /** Show debug (default: false) */
+  showDebug?: boolean;
   /** Default tool for the viewer */
-  defaultTool?: ToolType;
+  defaultTool?: "select" | "pan" | "measure";
   /** Callback when measurement is complete */
   onMeasureComplete?: (distance: number) => void;
   /** Callback when entities are loaded */
@@ -36,4 +37,49 @@ export interface EntityProcessorProps {
 
 export interface EntityStats {
   [key: string]: number;
+}
+
+export interface ToolContext {
+  camera: THREE.PerspectiveCamera;
+  renderer: THREE.WebGLRenderer;
+  scene: THREE.Scene;
+  group: THREE.Group;
+  controls: any; // OrbitControls type
+}
+
+export interface EntityTypes {
+  LINE: ILineEntity;
+  ARC: IArcEntity;
+  CIRCLE: ICircleEntity;
+  POLYLINE: IPolylineEntity;
+  SPLINE: ISplineEntity;
+}
+
+export interface ILineEntity extends IEntity {
+  type: "LINE";
+  vertices: Array<{ x: number; y: number; z: number }>;
+}
+
+export interface IArcEntity extends IEntity {
+  type: "ARC";
+  center: { x: number; y: number; z: number };
+  radius: number;
+  startAngle: number;
+  endAngle: number;
+}
+
+export interface ICircleEntity extends IEntity {
+  type: "CIRCLE";
+  center: { x: number; y: number; z: number };
+  radius: number;
+}
+
+export interface IPolylineEntity extends IEntity {
+  type: "POLYLINE";
+  vertices: Array<{ x: number; y: number; z: number }>;
+}
+
+export interface ISplineEntity extends IEntity {
+  type: "SPLINE";
+  vertices: Array<{ x: number; y: number; z: number }>;
 }

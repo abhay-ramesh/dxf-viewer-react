@@ -7,6 +7,7 @@ import { setupControls } from "./setupControls";
 import { setupScene } from "./setupScene";
 import { MeasureTool, PanTool, SelectTool, Tool } from "./tools";
 import { DxfViewerProps } from "./types";
+import { DxfAnalyzer } from "./utils/DxfAnalyzer";
 
 // Reusable constants and geometries
 const GRID_SIZE = 1000;
@@ -48,6 +49,7 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
   onError,
   defaultTool = "pan",
   onMeasureComplete,
+  showDebug = false,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -332,6 +334,19 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
     }
   }, [showDebugInfo, stats, entities.length]);
 
+  // Analyze DXF for closed loops
+  const analyzedData = useMemo(() => {
+    if (!dxfContent || !entities) return null;
+    return {
+      totalEntities: entities.length,
+      entityTypes: Object.entries(stats).map(([type, count]) => ({
+        type,
+        count,
+      })),
+      closedLoops: DxfAnalyzer.findClosedLoops({ entities }),
+    };
+  }, [dxfContent, entities, stats]);
+
   return (
     <div style={{ width, height, position: "relative" }}>
       <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
@@ -387,20 +402,150 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
         </button>
       </div>
 
-      {/* Hover Info Display */}
+      {/* Consolidated Debug Panel */}
+      {(showDebug || showDebugInfo || selectedEntityInfo) && (
+        <div
+          style={{
+            position: "absolute",
+            top: "1rem",
+            right: "1rem",
+            background: "rgba(0, 0, 0, 0.85)",
+            color: "white",
+            padding: "1rem",
+            borderRadius: "0.5rem",
+            fontFamily: "monospace",
+            fontSize: "0.875rem",
+            minWidth: "250px",
+            maxWidth: "350px",
+            maxHeight: "calc(100% - 2rem)",
+            overflowY: "auto",
+            zIndex: 1000,
+            boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
+          }}
+        >
+          {/* Entity Statistics Section */}
+          {(showDebug || showDebugInfo) && analyzedData && (
+            <>
+              <div style={{ marginBottom: "1rem" }}>
+                <div
+                  style={{
+                    borderBottom: "1px solid rgba(255,255,255,0.3)",
+                    paddingBottom: "0.5rem",
+                    marginBottom: "0.5rem",
+                    fontWeight: "bold",
+                  }}
+                >
+                  Entity Statistics
+                </div>
+                <div style={{ marginBottom: "0.5rem" }}>
+                  <strong>Total Entities:</strong> {analyzedData.totalEntities}
+                </div>
+                <div>
+                  {analyzedData.entityTypes.map(({ type, count }) => (
+                    <div key={type} style={{ paddingLeft: "1rem" }}>
+                      {type}: {count}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Closed Loops Section */}
+              <div style={{ marginBottom: "1rem" }}>
+                <div
+                  style={{
+                    borderBottom: "1px solid rgba(255,255,255,0.3)",
+                    paddingBottom: "0.5rem",
+                    marginBottom: "0.5rem",
+                    fontWeight: "bold",
+                  }}
+                >
+                  Closed Loops ({analyzedData.closedLoops.length})
+                </div>
+                {analyzedData.closedLoops.map((loop, index) => (
+                  <div
+                    key={index}
+                    style={{
+                      marginBottom: "0.75rem",
+                      paddingLeft: "0.5rem",
+                      borderLeft: "2px solid rgba(255,255,255,0.3)",
+                    }}
+                  >
+                    <div style={{ fontWeight: "bold" }}>Loop {index + 1}</div>
+                    <div style={{ paddingLeft: "0.5rem", fontSize: "0.8rem" }}>
+                      <div>Entities: {loop.entities.length}</div>
+                      <div>Area: {loop.area.toFixed(2)} units²</div>
+                      <div>Perimeter: {loop.perimeter.toFixed(2)} units</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {/* Selected Entity Section */}
+          {selectedEntityInfo && (
+            <div>
+              <div
+                style={{
+                  borderBottom: "1px solid rgba(255,255,255,0.3)",
+                  paddingBottom: "0.5rem",
+                  marginBottom: "0.5rem",
+                  fontWeight: "bold",
+                }}
+              >
+                Selected Entity
+              </div>
+              <div style={{ paddingLeft: "0.5rem" }}>
+                <div style={{ fontWeight: "bold", marginBottom: "0.25rem" }}>
+                  Type: {selectedEntityInfo.type}
+                </div>
+                {selectedEntityInfo.length !== undefined && (
+                  <div>Length: {selectedEntityInfo.length.toFixed(2)}</div>
+                )}
+                {selectedEntityInfo.radius !== undefined && (
+                  <div>Radius: {selectedEntityInfo.radius.toFixed(2)}</div>
+                )}
+                {selectedEntityInfo.vertices !== undefined && (
+                  <div>Vertices: {selectedEntityInfo.vertices}</div>
+                )}
+                {selectedEntityInfo.center && (
+                  <div>
+                    Center: ({selectedEntityInfo.center.x.toFixed(1)},
+                    {selectedEntityInfo.center.y.toFixed(1)})
+                  </div>
+                )}
+                {selectedEntityInfo.startPoint && (
+                  <div>
+                    Start: ({selectedEntityInfo.startPoint.x.toFixed(1)},
+                    {selectedEntityInfo.startPoint.y.toFixed(1)})
+                  </div>
+                )}
+                {selectedEntityInfo.endPoint && (
+                  <div>
+                    End: ({selectedEntityInfo.endPoint.x.toFixed(1)},
+                    {selectedEntityInfo.endPoint.y.toFixed(1)})
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Keep the hover info separate as it follows the cursor */}
       {hoverInfo && (
         <div
           style={{
             position: "absolute",
             top: `${hoverInfo.y + 20}px`,
             left: `${hoverInfo.x + 20}px`,
-            background: "#00000088",
+            background: "rgba(0, 0, 0, 0.75)",
             color: "white",
             padding: "0.25rem 0.5rem",
             borderRadius: "4px",
             fontSize: "12px",
             pointerEvents: "none",
-            zIndex: 1000,
+            zIndex: 1001,
           }}
         >
           {hoverInfo.info.type}
@@ -413,73 +558,6 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
         </div>
       )}
 
-      {/* Debug Info */}
-      {showDebugInfo && debugInfo && (
-        <div
-          style={{
-            position: "absolute",
-            top: "1rem",
-            right: "1rem",
-            background: "#00000088",
-            color: "white",
-            padding: "0.5rem",
-            borderRadius: "4px",
-            whiteSpace: "pre-line",
-            fontSize: "12px",
-          }}
-        >
-          {debugInfo}
-        </div>
-      )}
-
-      {/* Selected Entity Info */}
-      {selectedEntityInfo && (
-        <div
-          style={{
-            position: "absolute",
-            top: showDebugInfo ? "5rem" : "1rem",
-            right: "1rem",
-            background: "#00000088",
-            color: "white",
-            padding: "0.5rem",
-            borderRadius: "4px",
-            fontSize: "12px",
-            minWidth: "200px",
-          }}
-        >
-          <div style={{ fontWeight: "bold", marginBottom: "4px" }}>
-            {selectedEntityInfo.type}
-          </div>
-          {selectedEntityInfo.length !== undefined && (
-            <div>Length: {selectedEntityInfo.length.toFixed(2)}</div>
-          )}
-          {selectedEntityInfo.radius !== undefined && (
-            <div>Radius: {selectedEntityInfo.radius.toFixed(2)}</div>
-          )}
-          {selectedEntityInfo.vertices !== undefined && (
-            <div>Vertices: {selectedEntityInfo.vertices}</div>
-          )}
-          {selectedEntityInfo.center && (
-            <div>
-              Center: ({selectedEntityInfo.center.x.toFixed(1)},
-              {selectedEntityInfo.center.y.toFixed(1)})
-            </div>
-          )}
-          {selectedEntityInfo.startPoint && (
-            <div>
-              Start: ({selectedEntityInfo.startPoint.x.toFixed(1)},
-              {selectedEntityInfo.startPoint.y.toFixed(1)})
-            </div>
-          )}
-          {selectedEntityInfo.endPoint && (
-            <div>
-              End: ({selectedEntityInfo.endPoint.x.toFixed(1)},
-              {selectedEntityInfo.endPoint.y.toFixed(1)})
-            </div>
-          )}
-        </div>
-      )}
-
       {/* Error Display */}
       {error && (
         <div
@@ -487,7 +565,7 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
             position: "absolute",
             top: "1rem",
             left: "1rem",
-            background: "#ff000088",
+            background: "rgba(255, 0, 0, 0.8)",
             color: "white",
             padding: "0.5rem",
             borderRadius: "4px",

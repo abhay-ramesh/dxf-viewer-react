@@ -141,6 +141,7 @@ function App() {
             {...viewerSettings}
             onLoad={setEntityStats}
             onError={(error) => setError(error.message)}
+            showDebug={true}
           />
         ) : null}
       </main>
