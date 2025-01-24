@@ -245,19 +245,39 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
       .getSize(new THREE.Vector3());
     const maxDim = Math.max(size.x, size.y, size.z);
 
+    // Basic settings
     controls.enableDamping = false;
     controls.enableZoom = true;
     controls.enablePan = true;
-    controls.enableRotate = false;
+    controls.enableRotate = true; // Enable rotation for trackpad
+
+    // Control speeds
     controls.zoomSpeed = 1.2;
     controls.panSpeed = 1.0;
+    controls.rotateSpeed = 0.5; // Lower rotate speed for smoother trackpad control
+
+    // Mouse/Trackpad settings
     controls.mouseButtons = {
-      LEFT: THREE.MOUSE.PAN,
-      MIDDLE: THREE.MOUSE.DOLLY,
-      RIGHT: THREE.MOUSE.ROTATE,
+      LEFT: THREE.MOUSE.PAN, // Pan with left click/one finger drag
+      MIDDLE: THREE.MOUSE.DOLLY, // Zoom with middle click/pinch
+      RIGHT: THREE.MOUSE.ROTATE, // Rotate with right click/two finger drag
     };
+
+    // Touch settings for trackpad gestures
+    controls.touches = {
+      ONE: THREE.TOUCH.PAN, // One finger drag to pan
+      TWO: THREE.TOUCH.DOLLY_ROTATE, // Two finger drag to rotate, pinch to zoom
+    };
+
+    // Zoom limits
     controls.minDistance = maxDim * 0.1;
     controls.maxDistance = maxDim * 10;
+
+    // Rotation limits (optional, comment out if you want full rotation)
+    controls.minPolarAngle = 0; // Limit vertical rotation
+    controls.maxPolarAngle = Math.PI / 2;
+
+    // Pan settings
     controls.screenSpacePanning = true;
     controls.target.copy(center);
 
