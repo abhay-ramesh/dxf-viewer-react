@@ -67,6 +67,7 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
     x: number;
     y: number;
   } | null>(null);
+  const [measureText, setMeasureText] = useState<string | null>(null);
 
   // Create material outside of useEffect
   const material = useMemo(
@@ -170,7 +171,9 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
         (info) => setSelectedEntityInfo(info),
         (info, x, y) => setHoverInfo(info ? { info, x, y } : null)
       ),
-      measure: new MeasureTool(onMeasureComplete),
+      measure: new MeasureTool(onMeasureComplete, undefined, (text) =>
+        setMeasureText(text)
+      ),
     }),
     [onMeasureComplete]
   );
@@ -401,6 +404,29 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
           Measure
         </button>
       </div>
+
+      {/* Measurement Display */}
+      {measureText && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: "1rem",
+            left: "50%",
+            transform: "translateX(-50%)",
+            background: "rgba(0, 0, 0, 0.85)",
+            color: "white",
+            padding: "0.5rem 1rem",
+            borderRadius: "0.5rem",
+            fontFamily: "monospace",
+            fontSize: "0.875rem",
+            zIndex: 1000,
+            boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {measureText}
+        </div>
+      )}
 
       {/* Consolidated Debug Panel */}
       {(showDebug || showDebugInfo || selectedEntityInfo) && (

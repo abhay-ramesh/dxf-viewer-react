@@ -11,23 +11,27 @@ export class MeasureTool implements Tool {
   private snapIndicator: THREE.Mesh | null = null;
   private startPoint: THREE.Mesh | null = null;
   private endPoint: THREE.Mesh | null = null;
+  private measureText: THREE.Sprite | null = null;
   private lineMaterial = new THREE.LineBasicMaterial({
     color: 0xff0000,
     linewidth: 2,
+    depthTest: false,
   });
   private tempLineMaterial = new THREE.LineBasicMaterial({
     color: 0xff0000,
     opacity: 0.5,
     transparent: true,
     linewidth: 1,
+    depthTest: false,
   });
   private pointMaterial = new THREE.MeshBasicMaterial({
     color: 0xff0000,
+    depthTest: false,
   });
   private snapMaterial = new THREE.MeshBasicMaterial({
     color: 0x00ff00,
-    opacity: 1,
-    transparent: false,
+    opacity: 0.7,
+    transparent: true,
     depthTest: false,
   });
 
@@ -37,20 +41,23 @@ export class MeasureTool implements Tool {
       distance: number | null,
       x: number,
       y: number
-    ) => void
+    ) => void,
+    private onMeasureDisplay?: (text: string | null) => void
   ) {
-    // Create snap indicator - larger and more visible
-    const snapGeometry = new THREE.SphereGeometry(0.5, 16, 16);
+    // Create snap indicator - small sphere for precise point indication
+    const snapGeometry = new THREE.SphereGeometry(0.3, 16, 16);
     this.snapIndicator = new THREE.Mesh(snapGeometry, this.snapMaterial);
     this.snapIndicator.visible = false;
-    this.snapIndicator.renderOrder = 999; // Ensure it renders on top
+    this.snapIndicator.renderOrder = 999;
 
-    // Create point indicators
-    const pointGeometry = new THREE.SphereGeometry(0.8, 16, 16);
+    // Create point indicators - larger spheres for start/end points
+    const pointGeometry = new THREE.SphereGeometry(0.5, 16, 16);
     this.startPoint = new THREE.Mesh(pointGeometry, this.pointMaterial);
     this.endPoint = new THREE.Mesh(pointGeometry, this.pointMaterial);
     this.startPoint.visible = false;
     this.endPoint.visible = false;
+    this.startPoint.renderOrder = 998;
+    this.endPoint.renderOrder = 998;
   }
 
   activate({ controls, scene }: ToolContext) {
@@ -62,14 +69,43 @@ export class MeasureTool implements Tool {
     if (this.snapIndicator) scene.add(this.snapIndicator);
     if (this.startPoint) scene.add(this.startPoint);
     if (this.endPoint) scene.add(this.endPoint);
+
+    // Reset state
+    this.points = [];
+    this.clearMeasurement(scene);
+
+    // Clear any existing snap points
+    this.snapPoints.forEach((point) => scene.remove(point));
+    this.snapPoints = [];
   }
 
   deactivate({ controls, scene }: ToolContext) {
     controls.enablePan = false;
     controls.mouseButtons.LEFT = -1;
+
+    // Clean up
+    this.clearMeasurement(scene);
     this.points = [];
 
-    // Clean up visual elements
+    if (this.snapIndicator) {
+      scene.remove(this.snapIndicator);
+    }
+    if (this.startPoint) {
+      scene.remove(this.startPoint);
+    }
+    if (this.endPoint) {
+      scene.remove(this.endPoint);
+    }
+
+    // Clean up snap points
+    this.snapPoints.forEach((point) => scene.remove(point));
+    this.snapPoints = [];
+
+    this.onMeasureUpdate?.(null, 0, 0);
+    this.updateMeasurement(null);
+  }
+
+  private clearMeasurement(scene: THREE.Scene) {
     if (this.measureLine) {
       scene.remove(this.measureLine);
       this.measureLine = null;
@@ -78,18 +114,12 @@ export class MeasureTool implements Tool {
       scene.remove(this.tempLine);
       this.tempLine = null;
     }
-    if (this.snapIndicator) {
-      scene.remove(this.snapIndicator);
+    if (this.measureText) {
+      scene.remove(this.measureText);
+      this.measureText = null;
     }
-    if (this.startPoint) {
-      scene.remove(this.startPoint);
-      this.startPoint.visible = false;
-    }
-    if (this.endPoint) {
-      scene.remove(this.endPoint);
-      this.endPoint.visible = false;
-    }
-    this.onMeasureUpdate?.(null, 0, 0);
+    if (this.startPoint) this.startPoint.visible = false;
+    if (this.endPoint) this.endPoint.visible = false;
   }
 
   private findNearestPoint(
@@ -119,6 +149,104 @@ export class MeasureTool implements Tool {
     return nearestPoint;
   }
 
+  private createMeasurementText(
+    distance: number,
+    midPoint: THREE.Vector3
+  ): THREE.Sprite {
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d")!;
+    canvas.width = 128;
+    canvas.height = 32;
+
+    // Draw text
+    context.fillStyle = "rgba(0, 0, 0, 0.8)";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.font = "bold 16px Arial";
+    context.fillStyle = "white";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText(
+      `${distance.toFixed(2)} units`,
+      canvas.width / 2,
+      canvas.height / 2
+    );
+
+    // Create sprite
+    const texture = new THREE.CanvasTexture(canvas);
+    const spriteMaterial = new THREE.SpriteMaterial({
+      map: texture,
+      depthTest: false,
+      sizeAttenuation: false,
+    });
+    const sprite = new THREE.Sprite(spriteMaterial);
+    sprite.position.copy(midPoint);
+    sprite.scale.set(1, 0.25, 1);
+    sprite.renderOrder = 1000;
+
+    return sprite;
+  }
+
+  private snapPoints: THREE.Mesh[] = [];
+  private snapPointMaterial = new THREE.MeshBasicMaterial({
+    color: 0x00ff00,
+    opacity: 0.3,
+    transparent: true,
+    depthTest: false,
+  });
+
+  private updateSnapPoints(
+    scene: THREE.Scene,
+    group: THREE.Group,
+    currentPoint: THREE.Vector3
+  ) {
+    // Clear existing snap points
+    this.snapPoints.forEach((point) => scene.remove(point));
+    this.snapPoints = [];
+
+    // Find the nearest point
+    let nearestPoint = null;
+    let minDistance = this.snapDistance * 2;
+
+    group.traverse((object) => {
+      if (object instanceof THREE.Line) {
+        const positions = object.geometry.getAttribute("position");
+        for (let i = 0; i < positions.count; i++) {
+          const vertex = new THREE.Vector3();
+          vertex.fromBufferAttribute(positions, i);
+          object.localToWorld(vertex);
+
+          const distance = currentPoint.distanceTo(vertex);
+          if (distance < minDistance) {
+            minDistance = distance;
+            nearestPoint = vertex;
+          }
+        }
+      }
+    });
+
+    // Only show the nearest point if one was found
+    if (nearestPoint) {
+      const snapPointGeometry = new THREE.SphereGeometry(0.2, 8, 8);
+      const snapPoint = new THREE.Mesh(
+        snapPointGeometry,
+        this.snapPointMaterial
+      );
+      snapPoint.position.copy(nearestPoint);
+      snapPoint.renderOrder = 997;
+      scene.add(snapPoint);
+      this.snapPoints.push(snapPoint);
+    }
+  }
+
+  private updateMeasurement(distance: number | null) {
+    if (distance === null) {
+      this.onMeasureDisplay?.(null);
+      return;
+    }
+    const text = `Distance: ${distance.toFixed(2)} units`;
+    this.onMeasureDisplay?.(text);
+  }
+
   onMouseMove(
     event: MouseEvent,
     { camera, renderer, scene, group }: ToolContext
@@ -136,10 +264,17 @@ export class MeasureTool implements Tool {
     const nearestPoint = this.findNearestPoint(intersectPoint, group);
     const currentPoint = nearestPoint || intersectPoint;
 
+    // Update snap points visualization
+    this.updateSnapPoints(scene, group, currentPoint);
+
     // Update snap indicator
     if (this.snapIndicator) {
       this.snapIndicator.position.copy(currentPoint);
       this.snapIndicator.visible = true;
+      // Make snap indicator more visible when near a snap point
+      if (this.snapIndicator.material instanceof THREE.MeshBasicMaterial) {
+        this.snapIndicator.material.opacity = nearestPoint ? 1.0 : 0.7;
+      }
     }
 
     // Update temporary line if we have a start point
@@ -156,11 +291,7 @@ export class MeasureTool implements Tool {
 
       // Calculate and display current distance
       const distance = this.points[0].distanceTo(currentPoint);
-      this.onMeasureUpdate?.(
-        Number(distance.toFixed(2)),
-        event.clientX,
-        event.clientY - 20
-      );
+      this.updateMeasurement(distance);
     }
   }
 
@@ -211,21 +342,15 @@ export class MeasureTool implements Tool {
 
       // Calculate and report distance
       const distance = this.points[0].distanceTo(this.points[1]);
-      this.onMeasureComplete?.(Number(distance.toFixed(2)));
-      this.onMeasureUpdate?.(null, 0, 0);
+      this.onMeasureComplete?.(distance);
+      this.updateMeasurement(distance);
 
-      // Reset points for next measurement
-      this.points = [];
-
-      // Hide point indicators after a delay
+      // Reset points for next measurement after a short delay
       setTimeout(() => {
-        if (this.startPoint) this.startPoint.visible = false;
-        if (this.endPoint) this.endPoint.visible = false;
-        if (this.measureLine && scene) {
-          scene.remove(this.measureLine);
-          this.measureLine = null;
-        }
-      }, 5000);
+        this.clearMeasurement(scene);
+        this.points = [];
+        this.updateMeasurement(null);
+      }, 2000);
     }
   }
 }
