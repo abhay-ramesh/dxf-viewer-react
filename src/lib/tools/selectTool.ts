@@ -49,14 +49,21 @@ export class SelectTool implements Tool {
     controls.mouseButtons.LEFT = -1;
 
     // Clear any selection
+    this.clearSelection();
+    // Clear any hover state
+    this.clearHover();
+  }
+
+  private clearSelection() {
     if (this.selectedObject && this.originalMaterial) {
       (this.selectedObject as THREE.Line).material = this.originalMaterial;
       this.selectedObject = null;
       this.originalMaterial = null;
       this.onInfoUpdate?.(null);
     }
+  }
 
-    // Clear any hover state
+  private clearHover() {
     if (this.hoveredObject && this.hoveredMaterial) {
       (this.hoveredObject as THREE.Line).material = this.hoveredMaterial;
       this.hoveredObject = null;
@@ -131,22 +138,20 @@ export class SelectTool implements Tool {
     // Find intersections
     const intersects = this.raycaster.intersectObjects(group.children, true);
 
-    // Clear previous hover state
-    if (
-      this.hoveredObject &&
-      this.hoveredMaterial &&
-      (!intersects.length || intersects[0].object !== this.hoveredObject)
-    ) {
-      (this.hoveredObject as THREE.Line).material = this.hoveredMaterial;
-      this.hoveredObject = null;
-      this.hoveredMaterial = null;
-      this.onHoverUpdate?.(null, 0, 0);
+    // Clear previous hover if we're not hovering over anything or hovering over a different object
+    if (!intersects.length || intersects[0].object !== this.hoveredObject) {
+      this.clearHover();
     }
 
-    // Set new hover state
-    if (intersects.length > 0 && intersects[0].object !== this.selectedObject) {
+    // Set new hover state if we're hovering over a new object that isn't selected
+    if (
+      intersects.length > 0 &&
+      intersects[0].object !== this.selectedObject &&
+      intersects[0].object !== this.hoveredObject
+    ) {
       const newHoverObject = intersects[0].object;
       if (newHoverObject instanceof THREE.Line) {
+        // Store original material before setting hover
         this.hoveredObject = newHoverObject;
         this.hoveredMaterial = newHoverObject.material;
         newHoverObject.material = this.hoverMaterial;
@@ -159,14 +164,6 @@ export class SelectTool implements Tool {
   }
 
   onMouseDown(event: MouseEvent, { camera, renderer, group }: ToolContext) {
-    // Clear previous selection
-    if (this.selectedObject && this.originalMaterial) {
-      (this.selectedObject as THREE.Line).material = this.originalMaterial;
-      this.selectedObject = null;
-      this.originalMaterial = null;
-      this.onInfoUpdate?.(null);
-    }
-
     // Get mouse position in normalized device coordinates
     const rect = renderer.domElement.getBoundingClientRect();
     const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
@@ -178,18 +175,23 @@ export class SelectTool implements Tool {
     // Find intersections
     const intersects = this.raycaster.intersectObjects(group.children, true);
 
+    // Clear any existing selection
+    this.clearSelection();
+    // Clear any existing hover
+    this.clearHover();
+
     if (intersects.length > 0) {
-      this.selectedObject = intersects[0].object;
-      if (this.selectedObject instanceof THREE.Line) {
-        this.originalMaterial = this.selectedObject.material;
-        this.selectedObject.material = this.highlightMaterial;
+      const newSelection = intersects[0].object;
+      if (newSelection instanceof THREE.Line) {
+        // Store original material before setting selection
+        this.selectedObject = newSelection;
+        this.originalMaterial = newSelection.material;
+        newSelection.material = this.highlightMaterial;
 
         // Get and display entity info
-        const info = this.getEntityInfo(this.selectedObject);
+        const info = this.getEntityInfo(newSelection);
         this.onInfoUpdate?.(info);
       }
-    } else {
-      this.onInfoUpdate?.(null);
     }
   }
 }
