@@ -132,6 +132,8 @@ export class MeasureTool implements Tool {
     group.traverse((object) => {
       if (object instanceof THREE.Line) {
         const positions = object.geometry.getAttribute("position");
+
+        // Check vertices first
         for (let i = 0; i < positions.count; i++) {
           const vertex = new THREE.Vector3();
           vertex.fromBufferAttribute(positions, i);
@@ -141,6 +143,40 @@ export class MeasureTool implements Tool {
           if (distance < minDistance) {
             minDistance = distance;
             nearestPoint = vertex.clone();
+          }
+        }
+
+        // Then check line segments for perpendicular points
+        for (let i = 0; i < positions.count - 1; i++) {
+          const start = new THREE.Vector3();
+          const end = new THREE.Vector3();
+          start.fromBufferAttribute(positions, i);
+          end.fromBufferAttribute(positions, i + 1);
+          object.localToWorld(start);
+          object.localToWorld(end);
+
+          // Calculate line segment vector
+          const line = end.clone().sub(start);
+          const lineLength = line.length();
+
+          // Calculate vector from start to point
+          const pointVector = point.clone().sub(start);
+
+          // Project point onto line
+          const projection = pointVector.dot(line) / lineLength;
+
+          // Only use projection if it falls within the line segment
+          if (projection >= 0 && projection <= lineLength) {
+            const normalizedLine = line.clone().divideScalar(lineLength);
+            const projectedPoint = start
+              .clone()
+              .add(normalizedLine.multiplyScalar(projection));
+
+            const distance = point.distanceTo(projectedPoint);
+            if (distance < minDistance) {
+              minDistance = distance;
+              nearestPoint = projectedPoint;
+            }
           }
         }
       }
@@ -247,6 +283,26 @@ export class MeasureTool implements Tool {
     this.onMeasureDisplay?.(text);
   }
 
+  private constrainTo90Degrees(
+    start: THREE.Vector3,
+    end: THREE.Vector3
+  ): THREE.Vector3 {
+    const delta = new THREE.Vector3().subVectors(end, start);
+    const absX = Math.abs(delta.x);
+    const absY = Math.abs(delta.y);
+
+    // Determine which direction (x or y) has the larger change
+    const constrainedPoint = new THREE.Vector3().copy(start);
+    if (absX > absY) {
+      // Constrain to horizontal
+      constrainedPoint.x = end.x;
+    } else {
+      // Constrain to vertical
+      constrainedPoint.y = end.y;
+    }
+    return constrainedPoint;
+  }
+
   onMouseMove(
     event: MouseEvent,
     { camera, renderer, scene, group }: ToolContext
@@ -262,7 +318,12 @@ export class MeasureTool implements Tool {
 
     // Find nearest snap point
     const nearestPoint = this.findNearestPoint(intersectPoint, group);
-    const currentPoint = nearestPoint || intersectPoint;
+    let currentPoint = nearestPoint || intersectPoint;
+
+    // If shift is pressed and we have a start point, constrain to 90 degrees
+    if (event.shiftKey && this.points.length === 1) {
+      currentPoint = this.constrainTo90Degrees(this.points[0], currentPoint);
+    }
 
     // Update snap points visualization
     this.updateSnapPoints(scene, group, currentPoint);
@@ -271,7 +332,6 @@ export class MeasureTool implements Tool {
     if (this.snapIndicator) {
       this.snapIndicator.position.copy(currentPoint);
       this.snapIndicator.visible = true;
-      // Make snap indicator more visible when near a snap point
       if (this.snapIndicator.material instanceof THREE.MeshBasicMaterial) {
         this.snapIndicator.material.opacity = nearestPoint ? 1.0 : 0.7;
       }
@@ -309,8 +369,13 @@ export class MeasureTool implements Tool {
     this.raycaster.ray.intersectPlane(plane, intersectPoint);
 
     // Use snapped point if available
-    const point =
-      this.findNearestPoint(intersectPoint, group) || intersectPoint;
+    let point = this.findNearestPoint(intersectPoint, group) || intersectPoint;
+
+    // If shift is pressed and we have a start point, constrain to 90 degrees
+    if (event.shiftKey && this.points.length === 1) {
+      point = this.constrainTo90Degrees(this.points[0], point);
+    }
+
     this.points.push(point);
 
     if (this.points.length === 1) {
