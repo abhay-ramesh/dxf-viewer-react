@@ -1,26 +1,7 @@
-import DxfParser, {
-  IArcEntity,
-  ICircleEntity,
-  IEllipseEntity,
-  ILineEntity,
-  IPointEntity,
-  IPolylineEntity,
-  ISplineEntity,
-  ITextEntity,
-} from "dxf-parser";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
-import {
-  processArc,
-  processCircle,
-  processEllipse,
-  processLine,
-  processPoint,
-  processPolyline,
-  processSpline,
-  processText,
-} from "./processors";
+import { processDxf } from "./processDxf";
 import { setupCamera } from "./setupCamera";
 import { setupControls } from "./setupControls";
 import { setupScene } from "./setupScene";
@@ -72,88 +53,17 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
   const [snapPoint, setSnapPoint] = useState<THREE.Vector3 | null>(null);
   const snapIndicatorRef = useRef<THREE.Mesh | null>(null);
 
-  // Parse DXF outside of useEffect
-  const { entities, parseError } = useMemo(() => {
-    try {
-      const dxf = new DxfParser().parseSync(dxfContent);
-      return { entities: dxf?.entities || [], parseError: null };
-    } catch (error) {
-      return { entities: [], parseError: error };
-    }
-  }, [dxfContent]);
-
   // Create material outside of useEffect
   const material = useMemo(
     () => new THREE.LineBasicMaterial({ color: entityColor }),
     [entityColor]
   );
 
-  // Process entities and create group
-  const { group, stats } = useMemo(() => {
-    const stats: Record<string, number> = {};
-    const objects: THREE.Object3D[] = [];
-    const geometryCache = new Map<string, THREE.BufferGeometry>();
-
-    entities.forEach((entity) => {
-      try {
-        let object: THREE.Object3D | null = null;
-        stats[entity.type] = (stats[entity.type] || 0) + 1;
-
-        const cacheKey = `${entity.type}-${JSON.stringify(entity)}`;
-        let geometry = geometryCache.get(cacheKey);
-
-        if (!geometry) {
-          switch (entity.type) {
-            case "LINE":
-              object = processLine(entity as ILineEntity, material);
-              break;
-            case "ARC":
-              object = processArc(entity as IArcEntity, material);
-              break;
-            case "CIRCLE":
-              object = processCircle(entity as ICircleEntity, material);
-              break;
-            case "LWPOLYLINE":
-            case "POLYLINE":
-              object = processPolyline(entity as IPolylineEntity, material);
-              break;
-            case "SPLINE":
-              object = processSpline(entity as ISplineEntity, material);
-              break;
-            case "ELLIPSE":
-              object = processEllipse(entity as IEllipseEntity, material);
-              break;
-            case "POINT":
-              object = processPoint(entity as IPointEntity, material);
-              break;
-            case "TEXT":
-            case "MTEXT":
-              object = processText(entity as ITextEntity, material);
-              break;
-          }
-
-          if (object instanceof THREE.Line) {
-            geometry = object.geometry;
-            if (geometry) geometryCache.set(cacheKey, geometry);
-          }
-        }
-
-        if (geometry) {
-          object = new THREE.Line(geometry, material);
-        }
-
-        if (object) objects.push(object);
-      } catch (err) {
-        console.error("Failed to process entity:", entity.type, err);
-      }
-    });
-
-    const group = new THREE.Group();
-    objects.forEach((obj) => group.add(obj));
-    geometryCache.clear();
-
-    return { group, stats };
-  }, [entities, material]);
+  // Process DXF content
+  const { group, stats, entities, parseError } = useMemo(
+    () => processDxf(dxfContent, material),
+    [dxfContent, material]
+  );
 
   // Camera setup - memoized to avoid recalculation
   const { camera, center } = useMemo(() => {
