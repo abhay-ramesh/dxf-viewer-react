@@ -245,7 +245,6 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
     const size = new THREE.Box3()
       .setFromObject(group)
       .getSize(new THREE.Vector3());
-    const maxDim = Math.max(size.x, size.y, size.z);
 
     // Basic settings
     controls.enableDamping = false;
@@ -258,31 +257,28 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
     controls.panSpeed = 1.0;
     controls.rotateSpeed = 0.8;
 
-    // AutoCAD-style mouse controls
+    // Default mouse controls (when not measuring)
     controls.mouseButtons = {
-      MIDDLE: THREE.MOUSE.PAN, // Middle mouse button for pan
-      RIGHT: THREE.MOUSE.ROTATE, // Shift + Middle mouse for rotate
-      LEFT: null, // Left mouse reserved for selection/measurement
+      LEFT: THREE.MOUSE.PAN, // Left mouse button for pan
+      MIDDLE: THREE.MOUSE.PAN, // Middle mouse button also for pan
+      RIGHT: THREE.MOUSE.ROTATE, // Right mouse button for rotate
     };
 
-    // AutoCAD-style touch controls
+    // Touch controls
     controls.touches = {
-      TWO: THREE.TOUCH.PAN, // Two finger drag to pan
-      ONE: null, // One finger reserved for selection/measurement
+      ONE: THREE.TOUCH.PAN, // One finger drag to pan
+      TWO: THREE.TOUCH.DOLLY_ROTATE, // Two finger drag to rotate/zoom
     };
 
     // Add keyboard modifier for rotation (Shift key)
-    let isShiftDown = false;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Shift") {
-        isShiftDown = true;
         controls.mouseButtons.MIDDLE = THREE.MOUSE.ROTATE;
         controls.touches.TWO = THREE.TOUCH.DOLLY_ROTATE;
       }
     };
     const handleKeyUp = (event: KeyboardEvent) => {
       if (event.key === "Shift") {
-        isShiftDown = false;
         controls.mouseButtons.MIDDLE = THREE.MOUSE.PAN;
         controls.touches.TWO = THREE.TOUCH.PAN;
       }
