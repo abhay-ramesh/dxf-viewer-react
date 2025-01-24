@@ -5,6 +5,7 @@ import { processDxf } from "./processDxf";
 import { setupCamera } from "./setupCamera";
 import { setupControls } from "./setupControls";
 import { setupScene } from "./setupScene";
+import { MeasureTool, PanTool, SelectTool, Tool } from "./tools";
 import { DxfViewerProps } from "./types";
 
 // Reusable constants and geometries
@@ -24,6 +25,16 @@ const handleDxfError = (
   onError?.(error instanceof Error ? error : new Error(errorMessage));
 };
 
+interface EntityInfo {
+  type: string;
+  length?: number;
+  radius?: number;
+  center?: THREE.Vector3;
+  startPoint?: THREE.Vector3;
+  endPoint?: THREE.Vector3;
+  vertices?: number;
+}
+
 export const DxfViewer: React.FC<DxfViewerProps> = ({
   dxfContent,
   backgroundColor = 0xf0f0f0,
@@ -35,6 +46,8 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
   showDebugInfo = false,
   onLoad,
   onError,
+  defaultTool = "pan",
+  onMeasureComplete,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -44,14 +57,14 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
   const animationFrameRef = useRef<number>();
   const [error, setError] = useState<string | null>(null);
   const [debugInfo, setDebugInfo] = useState<string>("");
-  const [measurePoints, setMeasurePoints] = useState<THREE.Vector3[]>([]);
-  const [measureDistance, setMeasureDistance] = useState<number | null>(null);
-  const [showMeasurement, setShowMeasurement] = useState(false);
-  const measureLineRef = useRef<THREE.Line | null>(null);
-  const measureTimeoutRef = useRef<NodeJS.Timeout>();
-  const [measureMode, setMeasureMode] = useState(false);
-  const [snapPoint, setSnapPoint] = useState<THREE.Vector3 | null>(null);
-  const snapIndicatorRef = useRef<THREE.Mesh | null>(null);
+  const [activeTool, setActiveTool] = useState<Tool | null>(null);
+  const [selectedEntityInfo, setSelectedEntityInfo] =
+    useState<EntityInfo | null>(null);
+  const [hoverInfo, setHoverInfo] = useState<{
+    info: EntityInfo;
+    x: number;
+    y: number;
+  } | null>(null);
 
   // Create material outside of useEffect
   const material = useMemo(
@@ -147,142 +160,97 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
     renderer.setSize(width, height);
   }, []);
 
-  // Create snap indicator material and geometry - memoized
-  const snapIndicator = useMemo(() => {
-    const geometry = new THREE.SphereGeometry(0.5, 16, 16);
-    const material = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
-    return new THREE.Mesh(geometry, material);
-  }, []);
-
-  // Function to find nearest point
-  const findNearestPoint = useCallback(
-    (point: THREE.Vector3): THREE.Vector3 | null => {
-      if (!group) return null;
-
-      let nearestPoint = null;
-      let minDistance = 5; // Snap threshold
-
-      group.traverse((object) => {
-        if (object instanceof THREE.Line) {
-          const positions = object.geometry.getAttribute("position");
-          for (let i = 0; i < positions.count; i++) {
-            const vertex = new THREE.Vector3();
-            vertex.fromBufferAttribute(positions, i);
-            object.localToWorld(vertex); // Convert to world coordinates
-
-            const distance = point.distanceTo(vertex);
-            if (distance < minDistance) {
-              minDistance = distance;
-              nearestPoint = vertex.clone();
-            }
-          }
-        }
-      });
-
-      return nearestPoint;
-    },
-    [group]
+  // Create tools with info callback
+  const tools = useMemo(
+    () => ({
+      pan: new PanTool(),
+      select: new SelectTool(
+        (info) => setSelectedEntityInfo(info),
+        (info, x, y) => setHoverInfo(info ? { info, x, y } : null)
+      ),
+      measure: new MeasureTool(onMeasureComplete),
+    }),
+    [onMeasureComplete]
   );
 
-  // Enhanced measure click handler with snapping
-  const handleMeasureClick = useCallback(
+  // Handle tool changes
+  useEffect(() => {
+    if (!scene || !camera || !renderer || !controls || !group) return;
+
+    const toolContext = { scene, camera, renderer, controls, group };
+
+    // Deactivate current tool
+    activeTool?.deactivate(toolContext);
+
+    // Activate new tool
+    const newTool = tools[defaultTool];
+    newTool.activate(toolContext);
+    setActiveTool(newTool);
+
+    return () => newTool.deactivate(toolContext);
+  }, [defaultTool, scene, camera, renderer, controls, group, tools]);
+
+  // Handle mouse events
+  const handleMouseDown = useCallback(
     (event: MouseEvent) => {
-      if (!camera || !scene || !renderer) return;
-
-      // Get mouse position in normalized device coordinates (-1 to +1)
-      const rect = renderer.domElement.getBoundingClientRect();
-      const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-      const y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-
-      // Create raycaster
-      const raycaster = new THREE.Raycaster();
-      raycaster.setFromCamera(new THREE.Vector2(x, y), camera);
-
-      // Create a plane at z=0 to intersect with
-      const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
-      const intersectPoint = new THREE.Vector3();
-      raycaster.ray.intersectPlane(plane, intersectPoint);
-
-      // Find nearest snap point
-      const snappedPoint = findNearestPoint(intersectPoint) || intersectPoint;
-
-      setMeasurePoints((prev) => {
-        const newPoints = [...prev, snappedPoint];
-
-        // If we have two points, calculate and display distance
-        if (newPoints.length === 2) {
-          const distance = newPoints[0].distanceTo(newPoints[1]);
-          setMeasureDistance(distance);
-          setShowMeasurement(true);
-
-          // Create or update measurement line
-          const geometry = new THREE.BufferGeometry().setFromPoints(newPoints);
-          const material = new THREE.LineBasicMaterial({ color: 0xff0000 });
-
-          if (measureLineRef.current) {
-            scene.remove(measureLineRef.current);
-          }
-
-          const line = new THREE.Line(geometry, material);
-          measureLineRef.current = line;
-          scene.add(line);
-
-          // Set timeout to hide measurement after 5 seconds
-          if (measureTimeoutRef.current) {
-            clearTimeout(measureTimeoutRef.current);
-          }
-          measureTimeoutRef.current = setTimeout(() => {
-            setShowMeasurement(false);
-            if (measureLineRef.current && scene) {
-              scene.remove(measureLineRef.current);
-              measureLineRef.current = null;
-            }
-          }, 5000);
-
-          // Reset points for next measurement
-          return [];
-        }
-
-        return newPoints;
+      if (!scene || !camera || !renderer || !controls || !group || !activeTool)
+        return;
+      activeTool.onMouseDown?.(event, {
+        scene,
+        camera,
+        renderer,
+        controls,
+        group,
       });
     },
-    [camera, scene, renderer, findNearestPoint]
+    [scene, camera, renderer, controls, group, activeTool]
   );
 
-  // Add mouse move handler for snap preview
   const handleMouseMove = useCallback(
     (event: MouseEvent) => {
-      if (!camera || !scene || !renderer || !measureMode) return;
-
-      const rect = renderer.domElement.getBoundingClientRect();
-      const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-      const y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-
-      const raycaster = new THREE.Raycaster();
-      raycaster.setFromCamera(new THREE.Vector2(x, y), camera);
-
-      const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
-      const intersectPoint = new THREE.Vector3();
-      raycaster.ray.intersectPlane(plane, intersectPoint);
-
-      // Find nearest snap point
-      const nearestPoint = findNearestPoint(intersectPoint);
-      setSnapPoint(nearestPoint);
-
-      // Update snap indicator
-      if (nearestPoint) {
-        if (!snapIndicatorRef.current) {
-          snapIndicatorRef.current = snapIndicator.clone();
-          scene.add(snapIndicatorRef.current);
-        }
-        snapIndicatorRef.current.position.copy(nearestPoint);
-        snapIndicatorRef.current.visible = true;
-      } else if (snapIndicatorRef.current) {
-        snapIndicatorRef.current.visible = false;
-      }
+      if (!scene || !camera || !renderer || !controls || !group || !activeTool)
+        return;
+      activeTool.onMouseMove?.(event, {
+        scene,
+        camera,
+        renderer,
+        controls,
+        group,
+      });
     },
-    [camera, scene, renderer, measureMode, findNearestPoint, snapIndicator]
+    [scene, camera, renderer, controls, group, activeTool]
   );
+
+  const handleMouseUp = useCallback(
+    (event: MouseEvent) => {
+      if (!scene || !camera || !renderer || !controls || !group || !activeTool)
+        return;
+      activeTool.onMouseUp?.(event, {
+        scene,
+        camera,
+        renderer,
+        controls,
+        group,
+      });
+    },
+    [scene, camera, renderer, controls, group, activeTool]
+  );
+
+  // Add event listeners
+  useEffect(() => {
+    const canvas = renderer?.domElement;
+    if (!canvas) return;
+
+    canvas.addEventListener("mousedown", handleMouseDown);
+    canvas.addEventListener("mousemove", handleMouseMove);
+    canvas.addEventListener("mouseup", handleMouseUp);
+
+    return () => {
+      canvas.removeEventListener("mousedown", handleMouseDown);
+      canvas.removeEventListener("mousemove", handleMouseMove);
+      canvas.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [renderer, handleMouseDown, handleMouseMove, handleMouseUp]);
 
   // Main setup effect - now much simpler
   useEffect(() => {
@@ -364,108 +332,88 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
     }
   }, [showDebugInfo, stats, entities.length]);
 
-  // Update controls based on measure mode
-  useEffect(() => {
-    if (!controls) return;
-
-    if (measureMode) {
-      controls.enabled = false;
-      renderer?.domElement.addEventListener("click", handleMeasureClick);
-      renderer?.domElement.addEventListener("mousemove", handleMouseMove);
-    } else {
-      controls.enabled = true;
-      renderer?.domElement.removeEventListener("click", handleMeasureClick);
-      renderer?.domElement.removeEventListener("mousemove", handleMouseMove);
-
-      // Clear measurement and snap indicator
-      if (measureLineRef.current && scene) {
-        scene.remove(measureLineRef.current);
-        measureLineRef.current = null;
-      }
-      if (snapIndicatorRef.current && scene) {
-        scene.remove(snapIndicatorRef.current);
-        snapIndicatorRef.current = null;
-      }
-      if (measureTimeoutRef.current) {
-        clearTimeout(measureTimeoutRef.current);
-      }
-      setMeasurePoints([]);
-      setMeasureDistance(null);
-      setShowMeasurement(false);
-      setSnapPoint(null);
-    }
-
-    return () => {
-      renderer?.domElement.removeEventListener("click", handleMeasureClick);
-      renderer?.domElement.removeEventListener("mousemove", handleMouseMove);
-      if (measureTimeoutRef.current) {
-        clearTimeout(measureTimeoutRef.current);
-      }
-    };
-  }, [
-    measureMode,
-    controls,
-    renderer,
-    handleMeasureClick,
-    handleMouseMove,
-    scene,
-  ]);
-
   return (
     <div style={{ width, height, position: "relative" }}>
       <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
 
-      {/* Measurement toggle button */}
-      <button
-        onClick={() => setMeasureMode(!measureMode)}
+      {/* Tool buttons */}
+      <div
         style={{
           position: "absolute",
           bottom: "1rem",
           left: "1rem",
-          padding: "0.5rem",
-          background: measureMode ? "#ff0000" : "#ffffff",
-          color: measureMode ? "#ffffff" : "#000000",
-          border: "none",
-          borderRadius: "4px",
-          cursor: "pointer",
+          display: "flex",
+          gap: "0.5rem",
         }}
       >
-        {measureMode ? "Cancel Measure" : "Measure"}
-      </button>
+        <button
+          onClick={() => setActiveTool(tools.pan)}
+          style={{
+            padding: "0.5rem",
+            background: activeTool?.type === "pan" ? "#ff0000" : "#ffffff",
+            color: activeTool?.type === "pan" ? "#ffffff" : "#000000",
+            border: "none",
+            borderRadius: "4px",
+            cursor: "pointer",
+          }}
+        >
+          Pan
+        </button>
+        <button
+          onClick={() => setActiveTool(tools.select)}
+          style={{
+            padding: "0.5rem",
+            background: activeTool?.type === "select" ? "#ff0000" : "#ffffff",
+            color: activeTool?.type === "select" ? "#ffffff" : "#000000",
+            border: "none",
+            borderRadius: "4px",
+            cursor: "pointer",
+          }}
+        >
+          Select
+        </button>
+        <button
+          onClick={() => setActiveTool(tools.measure)}
+          style={{
+            padding: "0.5rem",
+            background: activeTool?.type === "measure" ? "#ff0000" : "#ffffff",
+            color: activeTool?.type === "measure" ? "#ffffff" : "#000000",
+            border: "none",
+            borderRadius: "4px",
+            cursor: "pointer",
+          }}
+        >
+          Measure
+        </button>
+      </div>
 
-      {/* Measurement display */}
-      {showMeasurement && measureDistance !== null && (
+      {/* Hover Info Display */}
+      {hoverInfo && (
         <div
           style={{
             position: "absolute",
-            bottom: "1rem",
-            left: "8rem",
-            padding: "0.5rem",
+            top: `${hoverInfo.y + 20}px`,
+            left: `${hoverInfo.x + 20}px`,
             background: "#00000088",
             color: "white",
+            padding: "0.25rem 0.5rem",
             borderRadius: "4px",
+            fontSize: "12px",
+            pointerEvents: "none",
+            zIndex: 1000,
           }}
         >
-          Distance: {measureDistance.toFixed(2)} units
+          {hoverInfo.info.type}
+          {hoverInfo.info.length !== undefined && (
+            <span> - Length: {hoverInfo.info.length.toFixed(1)}</span>
+          )}
+          {hoverInfo.info.radius !== undefined && (
+            <span> - Radius: {hoverInfo.info.radius.toFixed(1)}</span>
+          )}
         </div>
       )}
 
-      {/* Existing error and debug info */}
-      {error && (
-        <div
-          style={{
-            position: "absolute",
-            top: "1rem",
-            left: "1rem",
-            background: "#ff000088",
-            color: "white",
-            padding: "0.5rem",
-            borderRadius: "4px",
-          }}
-        >
-          {error}
-        </div>
-      )}
+      {/* Debug Info */}
       {showDebugInfo && debugInfo && (
         <div
           style={{
@@ -481,6 +429,71 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
           }}
         >
           {debugInfo}
+        </div>
+      )}
+
+      {/* Selected Entity Info */}
+      {selectedEntityInfo && (
+        <div
+          style={{
+            position: "absolute",
+            top: showDebugInfo ? "5rem" : "1rem",
+            right: "1rem",
+            background: "#00000088",
+            color: "white",
+            padding: "0.5rem",
+            borderRadius: "4px",
+            fontSize: "12px",
+            minWidth: "200px",
+          }}
+        >
+          <div style={{ fontWeight: "bold", marginBottom: "4px" }}>
+            {selectedEntityInfo.type}
+          </div>
+          {selectedEntityInfo.length !== undefined && (
+            <div>Length: {selectedEntityInfo.length.toFixed(2)}</div>
+          )}
+          {selectedEntityInfo.radius !== undefined && (
+            <div>Radius: {selectedEntityInfo.radius.toFixed(2)}</div>
+          )}
+          {selectedEntityInfo.vertices !== undefined && (
+            <div>Vertices: {selectedEntityInfo.vertices}</div>
+          )}
+          {selectedEntityInfo.center && (
+            <div>
+              Center: ({selectedEntityInfo.center.x.toFixed(1)},
+              {selectedEntityInfo.center.y.toFixed(1)})
+            </div>
+          )}
+          {selectedEntityInfo.startPoint && (
+            <div>
+              Start: ({selectedEntityInfo.startPoint.x.toFixed(1)},
+              {selectedEntityInfo.startPoint.y.toFixed(1)})
+            </div>
+          )}
+          {selectedEntityInfo.endPoint && (
+            <div>
+              End: ({selectedEntityInfo.endPoint.x.toFixed(1)},
+              {selectedEntityInfo.endPoint.y.toFixed(1)})
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Error Display */}
+      {error && (
+        <div
+          style={{
+            position: "absolute",
+            top: "1rem",
+            left: "1rem",
+            background: "#ff000088",
+            color: "white",
+            padding: "0.5rem",
+            borderRadius: "4px",
+          }}
+        >
+          {error}
         </div>
       )}
     </div>

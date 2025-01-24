@@ -1,5 +1,6 @@
 import { IEntity } from "dxf-parser";
 import { Color } from "three";
+import { ToolType } from "./tools";
 
 export interface DxfViewerProps {
   /** The DXF file content as a string */
@@ -18,8 +19,12 @@ export interface DxfViewerProps {
   showAxes?: boolean;
   /** Show debug information overlay (default: false) */
   showDebugInfo?: boolean;
+  /** Default tool for the viewer */
+  defaultTool?: ToolType;
+  /** Callback when measurement is complete */
+  onMeasureComplete?: (distance: number) => void;
   /** Callback when entities are loaded */
-  onLoad?: (entityStats: Record<string, number>) => void;
+  onLoad?: (stats: Record<string, number>) => void;
   /** Callback when an error occurs */
   onError?: (error: Error) => void;
 }
