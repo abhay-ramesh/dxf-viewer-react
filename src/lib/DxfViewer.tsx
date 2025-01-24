@@ -32,19 +32,6 @@ const GRID_SIZE = 1000;
 const GRID_DIVISIONS = 100;
 const AXES_SIZE = 500;
 
-const gridGeometry = new THREE.PlaneGeometry(
-  GRID_SIZE,
-  GRID_SIZE,
-  GRID_DIVISIONS,
-  GRID_DIVISIONS
-);
-const gridMaterial = new THREE.MeshBasicMaterial({
-  color: 0x444444,
-  opacity: 0.5,
-  transparent: true,
-  wireframe: true,
-});
-
 // Error handling functions
 const handleDxfError = (
   error: unknown,
@@ -77,6 +64,14 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
   const animationFrameRef = useRef<number>();
   const [error, setError] = useState<string | null>(null);
   const [debugInfo, setDebugInfo] = useState<string>("");
+  const [measurePoints, setMeasurePoints] = useState<THREE.Vector3[]>([]);
+  const [measureDistance, setMeasureDistance] = useState<number | null>(null);
+  const [showMeasurement, setShowMeasurement] = useState(false);
+  const measureLineRef = useRef<THREE.Line | null>(null);
+  const measureTimeoutRef = useRef<NodeJS.Timeout>();
+  const [measureMode, setMeasureMode] = useState(false);
+  const [snapPoint, setSnapPoint] = useState<THREE.Vector3 | null>(null);
+  const snapIndicatorRef = useRef<THREE.Mesh | null>(null);
 
   // Parse DXF outside of useEffect
   const { entities, parseError } = useMemo(() => {
@@ -221,8 +216,15 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
     scene.background = new THREE.Color(backgroundColor);
 
     if (showGrid) {
-      const grid = new THREE.Mesh(gridGeometry, gridMaterial);
-      grid.rotation.x = -Math.PI / 2;
+      // Create a grid helper instead of plane geometry
+      const grid = new THREE.GridHelper(
+        GRID_SIZE,
+        GRID_DIVISIONS,
+        0x888888, // Main grid lines
+        0x444444 // Secondary grid lines
+      );
+      // Rotate grid to XY plane (default is XZ)
+      grid.rotation.x = Math.PI / 2;
       scene.add(grid);
     }
 
@@ -249,12 +251,12 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
     controls.enableDamping = false;
     controls.enableZoom = true;
     controls.enablePan = true;
-    controls.enableRotate = true; // Enable rotation for trackpad
+    controls.enableRotate = true;
 
     // Control speeds
     controls.zoomSpeed = 1.2;
     controls.panSpeed = 1.0;
-    controls.rotateSpeed = 0.5; // Lower rotate speed for smoother trackpad control
+    controls.rotateSpeed = 0.8; // Increased for better rotation control
 
     // Mouse/Trackpad settings
     controls.mouseButtons = {
@@ -273,9 +275,11 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
     controls.minDistance = maxDim * 0.1;
     controls.maxDistance = maxDim * 10;
 
-    // Rotation limits (optional, comment out if you want full rotation)
-    controls.minPolarAngle = 0; // Limit vertical rotation
-    controls.maxPolarAngle = Math.PI / 2;
+    // Remove rotation limits for full rotation
+    controls.minPolarAngle = 0; // Allow full vertical rotation
+    controls.maxPolarAngle = Math.PI;
+    controls.minAzimuthAngle = -Infinity; // Allow full horizontal rotation
+    controls.maxAzimuthAngle = Infinity;
 
     // Pan settings
     controls.screenSpacePanning = true;
@@ -313,6 +317,143 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
     camera.updateProjectionMatrix();
     renderer.setSize(width, height);
   }, []);
+
+  // Create snap indicator material and geometry - memoized
+  const snapIndicator = useMemo(() => {
+    const geometry = new THREE.SphereGeometry(0.5, 16, 16);
+    const material = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
+    return new THREE.Mesh(geometry, material);
+  }, []);
+
+  // Function to find nearest point
+  const findNearestPoint = useCallback(
+    (point: THREE.Vector3): THREE.Vector3 | null => {
+      if (!group) return null;
+
+      let nearestPoint = null;
+      let minDistance = 5; // Snap threshold
+
+      group.traverse((object) => {
+        if (object instanceof THREE.Line) {
+          const positions = object.geometry.getAttribute("position");
+          for (let i = 0; i < positions.count; i++) {
+            const vertex = new THREE.Vector3();
+            vertex.fromBufferAttribute(positions, i);
+            object.localToWorld(vertex); // Convert to world coordinates
+
+            const distance = point.distanceTo(vertex);
+            if (distance < minDistance) {
+              minDistance = distance;
+              nearestPoint = vertex.clone();
+            }
+          }
+        }
+      });
+
+      return nearestPoint;
+    },
+    [group]
+  );
+
+  // Enhanced measure click handler with snapping
+  const handleMeasureClick = useCallback(
+    (event: MouseEvent) => {
+      if (!camera || !scene || !renderer) return;
+
+      // Get mouse position in normalized device coordinates (-1 to +1)
+      const rect = renderer.domElement.getBoundingClientRect();
+      const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      const y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+      // Create raycaster
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(new THREE.Vector2(x, y), camera);
+
+      // Create a plane at z=0 to intersect with
+      const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+      const intersectPoint = new THREE.Vector3();
+      raycaster.ray.intersectPlane(plane, intersectPoint);
+
+      // Find nearest snap point
+      const snappedPoint = findNearestPoint(intersectPoint) || intersectPoint;
+
+      setMeasurePoints((prev) => {
+        const newPoints = [...prev, snappedPoint];
+
+        // If we have two points, calculate and display distance
+        if (newPoints.length === 2) {
+          const distance = newPoints[0].distanceTo(newPoints[1]);
+          setMeasureDistance(distance);
+          setShowMeasurement(true);
+
+          // Create or update measurement line
+          const geometry = new THREE.BufferGeometry().setFromPoints(newPoints);
+          const material = new THREE.LineBasicMaterial({ color: 0xff0000 });
+
+          if (measureLineRef.current) {
+            scene.remove(measureLineRef.current);
+          }
+
+          const line = new THREE.Line(geometry, material);
+          measureLineRef.current = line;
+          scene.add(line);
+
+          // Set timeout to hide measurement after 5 seconds
+          if (measureTimeoutRef.current) {
+            clearTimeout(measureTimeoutRef.current);
+          }
+          measureTimeoutRef.current = setTimeout(() => {
+            setShowMeasurement(false);
+            if (measureLineRef.current && scene) {
+              scene.remove(measureLineRef.current);
+              measureLineRef.current = null;
+            }
+          }, 5000);
+
+          // Reset points for next measurement
+          return [];
+        }
+
+        return newPoints;
+      });
+    },
+    [camera, scene, renderer, findNearestPoint]
+  );
+
+  // Add mouse move handler for snap preview
+  const handleMouseMove = useCallback(
+    (event: MouseEvent) => {
+      if (!camera || !scene || !renderer || !measureMode) return;
+
+      const rect = renderer.domElement.getBoundingClientRect();
+      const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      const y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(new THREE.Vector2(x, y), camera);
+
+      const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+      const intersectPoint = new THREE.Vector3();
+      raycaster.ray.intersectPlane(plane, intersectPoint);
+
+      // Find nearest snap point
+      const nearestPoint = findNearestPoint(intersectPoint);
+      setSnapPoint(nearestPoint);
+
+      // Update snap indicator
+      if (nearestPoint) {
+        if (!snapIndicatorRef.current) {
+          snapIndicatorRef.current = snapIndicator.clone();
+          scene.add(snapIndicatorRef.current);
+        }
+        snapIndicatorRef.current.position.copy(nearestPoint);
+        snapIndicatorRef.current.visible = true;
+      } else if (snapIndicatorRef.current) {
+        snapIndicatorRef.current.visible = false;
+      }
+    },
+    [camera, scene, renderer, measureMode, findNearestPoint, snapIndicator]
+  );
 
   // Main setup effect - now much simpler
   useEffect(() => {
@@ -394,9 +535,93 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
     }
   }, [showDebugInfo, stats, entities.length]);
 
+  // Update controls based on measure mode
+  useEffect(() => {
+    if (!controls) return;
+
+    if (measureMode) {
+      controls.enabled = false;
+      renderer?.domElement.addEventListener("click", handleMeasureClick);
+      renderer?.domElement.addEventListener("mousemove", handleMouseMove);
+    } else {
+      controls.enabled = true;
+      renderer?.domElement.removeEventListener("click", handleMeasureClick);
+      renderer?.domElement.removeEventListener("mousemove", handleMouseMove);
+
+      // Clear measurement and snap indicator
+      if (measureLineRef.current && scene) {
+        scene.remove(measureLineRef.current);
+        measureLineRef.current = null;
+      }
+      if (snapIndicatorRef.current && scene) {
+        scene.remove(snapIndicatorRef.current);
+        snapIndicatorRef.current = null;
+      }
+      if (measureTimeoutRef.current) {
+        clearTimeout(measureTimeoutRef.current);
+      }
+      setMeasurePoints([]);
+      setMeasureDistance(null);
+      setShowMeasurement(false);
+      setSnapPoint(null);
+    }
+
+    return () => {
+      renderer?.domElement.removeEventListener("click", handleMeasureClick);
+      renderer?.domElement.removeEventListener("mousemove", handleMouseMove);
+      if (measureTimeoutRef.current) {
+        clearTimeout(measureTimeoutRef.current);
+      }
+    };
+  }, [
+    measureMode,
+    controls,
+    renderer,
+    handleMeasureClick,
+    handleMouseMove,
+    scene,
+  ]);
+
   return (
     <div style={{ width, height, position: "relative" }}>
       <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
+
+      {/* Measurement toggle button */}
+      <button
+        onClick={() => setMeasureMode(!measureMode)}
+        style={{
+          position: "absolute",
+          bottom: "1rem",
+          left: "1rem",
+          padding: "0.5rem",
+          background: measureMode ? "#ff0000" : "#ffffff",
+          color: measureMode ? "#ffffff" : "#000000",
+          border: "none",
+          borderRadius: "4px",
+          cursor: "pointer",
+        }}
+      >
+        {measureMode ? "Cancel Measure" : "Measure"}
+      </button>
+
+      {/* Measurement display */}
+      {showMeasurement && measureDistance !== null && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: "1rem",
+            left: "8rem",
+            padding: "0.5rem",
+            background: "#00000088",
+            color: "white",
+            borderRadius: "4px",
+          }}
+        >
+          Distance: {measureDistance.toFixed(2)} units
+        </div>
+      )}
+
+      {/* Existing error and debug info */}
       {error && (
         <div
           style={{
