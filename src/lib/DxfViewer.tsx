@@ -32,6 +32,9 @@ const GRID_SIZE = 1000;
 const GRID_DIVISIONS = 100;
 const AXES_SIZE = 500;
 
+// Add new types at the top
+type MeasureMode = "none" | "distance" | "angle" | "select";
+
 // Error handling functions
 const handleDxfError = (
   error: unknown,
@@ -69,9 +72,25 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
   const [showMeasurement, setShowMeasurement] = useState(false);
   const measureLineRef = useRef<THREE.Line | null>(null);
   const measureTimeoutRef = useRef<NodeJS.Timeout>();
-  const [measureMode, setMeasureMode] = useState(false);
+  const [measureMode, setMeasureMode] = useState<MeasureMode>("none");
+  const [selectedEntities, setSelectedEntities] = useState<THREE.Object3D[]>(
+    []
+  );
+  const [measureValue, setMeasureValue] = useState<string | null>(null);
+  const measurePolygonRef = useRef<THREE.Line | null>(null);
+  const selectionBoxRef = useRef<THREE.Line | null>(null);
+  const startPointRef = useRef<THREE.Vector2 | null>(null);
   const [snapPoint, setSnapPoint] = useState<THREE.Vector3 | null>(null);
   const snapIndicatorRef = useRef<THREE.Mesh | null>(null);
+
+  // Add cursor state for visual feedback
+  const [cursor, setCursor] = useState<string>("default");
+  const [measureGuide, setMeasureGuide] = useState<THREE.Line | null>(null);
+  const [measureText, setMeasureText] = useState<string>("");
+  const [mousePosition, setMousePosition] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
 
   // Parse DXF outside of useEffect
   const { entities, parseError } = useMemo(() => {
@@ -391,105 +410,155 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
     [group]
   );
 
-  // Enhanced measure click handler with snapping
+  // Function to calculate angle between three points
+  const calculateAngle = (
+    p1: THREE.Vector3,
+    p2: THREE.Vector3,
+    p3: THREE.Vector3
+  ) => {
+    const v1 = new THREE.Vector3().subVectors(p1, p2);
+    const v2 = new THREE.Vector3().subVectors(p3, p2);
+    return v1.angleTo(v2) * (180 / Math.PI);
+  };
+
+  // Enhanced measure click handler
   const handleMeasureClick = useCallback(
     (event: MouseEvent) => {
       if (!camera || !scene || !renderer) return;
 
-      // Get mouse position in normalized device coordinates (-1 to +1)
       const rect = renderer.domElement.getBoundingClientRect();
       const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
       const y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
 
-      // Create raycaster
       const raycaster = new THREE.Raycaster();
       raycaster.setFromCamera(new THREE.Vector2(x, y), camera);
 
-      // Create a plane at z=0 to intersect with
       const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
       const intersectPoint = new THREE.Vector3();
       raycaster.ray.intersectPlane(plane, intersectPoint);
 
-      // Find nearest snap point
       const snappedPoint = findNearestPoint(intersectPoint) || intersectPoint;
 
       setMeasurePoints((prev) => {
         const newPoints = [...prev, snappedPoint];
 
-        // If we have two points, calculate and display distance
-        if (newPoints.length === 2) {
-          const distance = newPoints[0].distanceTo(newPoints[1]);
-          setMeasureDistance(distance);
-          setShowMeasurement(true);
+        switch (measureMode) {
+          case "distance":
+            if (newPoints.length === 2) {
+              const distance = newPoints[0].distanceTo(newPoints[1]);
+              setMeasureValue(`Distance: ${distance.toFixed(2)} units`);
 
-          // Create or update measurement line
-          const geometry = new THREE.BufferGeometry().setFromPoints(newPoints);
-          const material = new THREE.LineBasicMaterial({ color: 0xff0000 });
+              const geometry = new THREE.BufferGeometry().setFromPoints(
+                newPoints
+              );
+              const material = new THREE.LineBasicMaterial({ color: 0xff0000 });
 
-          if (measureLineRef.current) {
-            scene.remove(measureLineRef.current);
-          }
+              if (measureLineRef.current) {
+                scene.remove(measureLineRef.current);
+              }
 
-          const line = new THREE.Line(geometry, material);
-          measureLineRef.current = line;
-          scene.add(line);
+              const line = new THREE.Line(geometry, material);
+              measureLineRef.current = line;
+              scene.add(line);
 
-          // Set timeout to hide measurement after 5 seconds
-          if (measureTimeoutRef.current) {
-            clearTimeout(measureTimeoutRef.current);
-          }
-          measureTimeoutRef.current = setTimeout(() => {
-            setShowMeasurement(false);
-            if (measureLineRef.current && scene) {
-              scene.remove(measureLineRef.current);
-              measureLineRef.current = null;
+              if (measureTimeoutRef.current) {
+                clearTimeout(measureTimeoutRef.current);
+              }
+              measureTimeoutRef.current = setTimeout(() => {
+                setMeasureValue(null);
+                if (measureLineRef.current && scene) {
+                  scene.remove(measureLineRef.current);
+                  measureLineRef.current = null;
+                }
+              }, 5000);
+
+              return [];
             }
-          }, 5000);
+            break;
 
-          // Reset points for next measurement
-          return [];
+          case "angle":
+            if (newPoints.length === 3) {
+              const angle = calculateAngle(
+                newPoints[0],
+                newPoints[1],
+                newPoints[2]
+              );
+              setMeasureValue(`Angle: ${angle.toFixed(1)}°`);
+
+              const geometry = new THREE.BufferGeometry().setFromPoints(
+                newPoints
+              );
+              const material = new THREE.LineBasicMaterial({ color: 0xff0000 });
+
+              if (measureLineRef.current) {
+                scene.remove(measureLineRef.current);
+              }
+
+              const line = new THREE.Line(geometry, material);
+              measureLineRef.current = line;
+              scene.add(line);
+
+              if (measureTimeoutRef.current) {
+                clearTimeout(measureTimeoutRef.current);
+              }
+              measureTimeoutRef.current = setTimeout(() => {
+                setMeasureValue(null);
+                if (measureLineRef.current && scene) {
+                  scene.remove(measureLineRef.current);
+                  measureLineRef.current = null;
+                }
+              }, 5000);
+
+              return [];
+            }
+            break;
+
+          case "select":
+            const intersects = raycaster.intersectObjects(group.children, true);
+            if (intersects.length > 0) {
+              const selected = intersects[0].object;
+              setSelectedEntities((prev) => {
+                if (event.shiftKey) {
+                  const isSelected = prev.includes(selected);
+                  return isSelected
+                    ? prev.filter((obj) => obj !== selected)
+                    : [...prev, selected];
+                } else {
+                  return [selected];
+                }
+              });
+            } else if (!event.shiftKey) {
+              setSelectedEntities([]);
+            }
+            return [];
         }
 
         return newPoints;
       });
     },
-    [camera, scene, renderer, findNearestPoint]
+    [camera, scene, renderer, measureMode, findNearestPoint, group]
   );
 
-  // Add mouse move handler for snap preview
-  const handleMouseMove = useCallback(
-    (event: MouseEvent) => {
-      if (!camera || !scene || !renderer || !measureMode) return;
-
-      const rect = renderer.domElement.getBoundingClientRect();
-      const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-      const y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-
-      const raycaster = new THREE.Raycaster();
-      raycaster.setFromCamera(new THREE.Vector2(x, y), camera);
-
-      const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
-      const intersectPoint = new THREE.Vector3();
-      raycaster.ray.intersectPlane(plane, intersectPoint);
-
-      // Find nearest snap point
-      const nearestPoint = findNearestPoint(intersectPoint);
-      setSnapPoint(nearestPoint);
-
-      // Update snap indicator
-      if (nearestPoint) {
-        if (!snapIndicatorRef.current) {
-          snapIndicatorRef.current = snapIndicator.clone();
-          scene.add(snapIndicatorRef.current);
-        }
-        snapIndicatorRef.current.position.copy(nearestPoint);
-        snapIndicatorRef.current.visible = true;
-      } else if (snapIndicatorRef.current) {
-        snapIndicatorRef.current.visible = false;
+  // Update selection visuals
+  useEffect(() => {
+    selectedEntities.forEach((entity) => {
+      if (entity instanceof THREE.Line) {
+        const originalMaterial = entity.material as THREE.LineBasicMaterial;
+        entity.material = new THREE.LineBasicMaterial({
+          color: 0xff0000,
+          linewidth: originalMaterial.linewidth,
+        });
       }
-    },
-    [camera, scene, renderer, measureMode, findNearestPoint, snapIndicator]
-  );
+    });
+
+    return () => {
+      selectedEntities.forEach((entity) => {
+        if (entity instanceof THREE.Line) {
+          entity.material = material;
+        }
+      });
+    };
+  }, [selectedEntities, material]);
 
   // Main setup effect - now much simpler
   useEffect(() => {
@@ -571,89 +640,206 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
     }
   }, [showDebugInfo, stats, entities.length]);
 
+  // Enhanced mouse move handler
+  const handleMouseMove = useCallback(
+    (event: MouseEvent) => {
+      if (!camera || !scene || !renderer || measureMode === "none") return;
+
+      const rect = renderer.domElement.getBoundingClientRect();
+      const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      const y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(new THREE.Vector2(x, y), camera);
+
+      const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+      const intersectPoint = new THREE.Vector3();
+      raycaster.ray.intersectPlane(plane, intersectPoint);
+
+      const snappedPoint = findNearestPoint(intersectPoint) || intersectPoint;
+
+      switch (measureMode) {
+        case "select":
+          const intersects = raycaster.intersectObjects(group.children, true);
+          setCursor(intersects.length > 0 ? "pointer" : "default");
+          break;
+        case "distance":
+        case "angle":
+          setCursor("crosshair");
+          break;
+      }
+
+      if (measurePoints.length > 0) {
+        if (measureGuide) {
+          scene.remove(measureGuide);
+        }
+
+        let points: THREE.Vector3[] = [];
+        switch (measureMode) {
+          case "distance":
+            points = [measurePoints[0], snappedPoint];
+            const distance = measurePoints[0].distanceTo(snappedPoint);
+            setMeasureText(`${distance.toFixed(2)} units`);
+            break;
+          case "angle":
+            if (measurePoints.length === 1) {
+              points = [measurePoints[0], snappedPoint];
+            } else if (measurePoints.length === 2) {
+              points = [measurePoints[0], measurePoints[1], snappedPoint];
+              const angle = calculateAngle(
+                measurePoints[0],
+                measurePoints[1],
+                snappedPoint
+              );
+              setMeasureText(`${angle.toFixed(1)}°`);
+            }
+            break;
+        }
+
+        if (points.length > 0) {
+          const geometry = new THREE.BufferGeometry().setFromPoints(points);
+          const material = new THREE.LineBasicMaterial({
+            color: 0xff0000,
+            opacity: 0.5,
+            transparent: true,
+          });
+
+          const guide = new THREE.Line(geometry, material);
+          scene.add(guide);
+          setMeasureGuide(guide);
+        }
+      }
+    },
+    [
+      camera,
+      scene,
+      renderer,
+      measureMode,
+      measurePoints,
+      findNearestPoint,
+      group,
+      calculateAngle,
+    ]
+  );
+
   // Update controls based on measure mode
   useEffect(() => {
-    if (!controls) return;
+    if (!controls || !renderer?.domElement) return;
 
-    if (measureMode) {
-      controls.enabled = false;
-      renderer?.domElement.addEventListener("click", handleMeasureClick);
-      renderer?.domElement.addEventListener("mousemove", handleMouseMove);
+    controls.enabled = measureMode === "none";
+
+    if (measureMode !== "none") {
+      renderer.domElement.addEventListener("mousemove", handleMouseMove);
+      renderer.domElement.addEventListener("click", handleMeasureClick);
     } else {
-      controls.enabled = true;
-      renderer?.domElement.removeEventListener("click", handleMeasureClick);
-      renderer?.domElement.removeEventListener("mousemove", handleMouseMove);
+      renderer.domElement.removeEventListener("mousemove", handleMouseMove);
+      renderer.domElement.removeEventListener("click", handleMeasureClick);
 
-      // Clear measurement and snap indicator
-      if (measureLineRef.current && scene) {
-        scene.remove(measureLineRef.current);
-        measureLineRef.current = null;
-      }
-      if (snapIndicatorRef.current && scene) {
-        scene.remove(snapIndicatorRef.current);
-        snapIndicatorRef.current = null;
-      }
-      if (measureTimeoutRef.current) {
-        clearTimeout(measureTimeoutRef.current);
+      // Clear measurements
+      if (measureGuide && scene) {
+        scene.remove(measureGuide);
+        setMeasureGuide(null);
       }
       setMeasurePoints([]);
-      setMeasureDistance(null);
-      setShowMeasurement(false);
-      setSnapPoint(null);
+      setMeasureText("");
+      setCursor("default");
     }
 
     return () => {
-      renderer?.domElement.removeEventListener("click", handleMeasureClick);
-      renderer?.domElement.removeEventListener("mousemove", handleMouseMove);
-      if (measureTimeoutRef.current) {
-        clearTimeout(measureTimeoutRef.current);
-      }
+      renderer.domElement.removeEventListener("mousemove", handleMouseMove);
+      renderer.domElement.removeEventListener("click", handleMeasureClick);
     };
   }, [
     measureMode,
     controls,
     renderer,
-    handleMeasureClick,
-    handleMouseMove,
     scene,
+    handleMouseMove,
+    handleMeasureClick,
   ]);
+
+  // Update container cursor
+  useEffect(() => {
+    if (containerRef.current) {
+      containerRef.current.style.cursor = cursor;
+    }
+  }, [cursor]);
 
   return (
     <div style={{ width, height, position: "relative" }}>
       <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
 
-      {/* Measurement toggle button */}
-      <button
-        onClick={() => setMeasureMode(!measureMode)}
+      {/* Mode indicator */}
+      <div
+        style={{
+          position: "absolute",
+          top: "1rem",
+          left: "50%",
+          transform: "translateX(-50%)",
+          padding: "0.5rem",
+          background: "#00000088",
+          color: "white",
+          borderRadius: "4px",
+          display: measureMode !== "none" ? "block" : "none",
+        }}
+      >
+        {measureMode.charAt(0).toUpperCase() + measureMode.slice(1)} Mode
+        {measureText && ` - ${measureText}`}
+      </div>
+
+      {/* Measurement mode buttons */}
+      <div
         style={{
           position: "absolute",
           bottom: "1rem",
           left: "1rem",
-          padding: "0.5rem",
-          background: measureMode ? "#ff0000" : "#ffffff",
-          color: measureMode ? "#ffffff" : "#000000",
-          border: "none",
-          borderRadius: "4px",
-          cursor: "pointer",
+          display: "flex",
+          gap: "0.5rem",
         }}
       >
-        {measureMode ? "Cancel Measure" : "Measure"}
-      </button>
+        {(["none", "select", "distance", "angle"] as const).map((mode) => (
+          <button
+            key={mode}
+            onClick={() => {
+              setMeasureMode(mode);
+              setMeasurePoints([]);
+              setMeasureText("");
+              if (measureGuide && scene) {
+                scene.remove(measureGuide);
+                setMeasureGuide(null);
+              }
+            }}
+            style={{
+              padding: "0.5rem",
+              background: measureMode === mode ? "#ff0000" : "#ffffff",
+              color: measureMode === mode ? "#ffffff" : "#000000",
+              border: "none",
+              borderRadius: "4px",
+              cursor: "pointer",
+            }}
+          >
+            {mode === "none"
+              ? "Pan"
+              : mode.charAt(0).toUpperCase() + mode.slice(1)}
+          </button>
+        ))}
+      </div>
 
-      {/* Measurement display */}
-      {showMeasurement && measureDistance !== null && (
+      {/* Measurement value display */}
+      {measureValue && (
         <div
           style={{
             position: "absolute",
             bottom: "1rem",
-            left: "8rem",
+            left: "50%",
+            transform: "translateX(-50%)",
             padding: "0.5rem",
             background: "#00000088",
             color: "white",
             borderRadius: "4px",
           }}
         >
-          Distance: {measureDistance.toFixed(2)} units
+          {measureValue}
         </div>
       )}
 
