@@ -154,20 +154,6 @@ function App() {
           />
         ) : null}
       </main>
-      <footer className="footer">
-        {Object.keys(entityStats).length > 0 && (
-          <div className="stats">
-            <h3>Entity Statistics</h3>
-            <ul>
-              {Object.entries(entityStats).map(([type, count]) => (
-                <li key={type}>
-                  {type}: {count}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </footer>
     </div>
   );
 }
