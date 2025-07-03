@@ -626,21 +626,6 @@ function isPointOnLineSegment(
 // Removed more unused tracing helper functions
 
 // Calculate signed area to determine winding order
-function calculateSignedPolygonArea(
-  vertices: Array<{ x: number; y: number }>
-): number {
-  let area = 0;
-  for (let i = 0; i < vertices.length; i++) {
-    const j = (i + 1) % vertices.length;
-    area += vertices[i].x * vertices[j].y;
-    area -= vertices[j].x * vertices[i].y;
-  }
-  return area / 2;
-}
-
-function isClockwise(vertices: Array<{ x: number; y: number }>): boolean {
-  return calculateSignedPolygonArea(vertices) < 0;
-}
 
 // Removed unused calculatePolygonPerimeter function
 
@@ -1362,6 +1347,54 @@ function calculateLoopPerimeter(
   }
   return perimeter;
 }
+
+// Add comprehensive LWPOLYLINE diagnostic function
+function debugLwpolylineEntity(entity: IEntity, index: number) {
+  if (entity.type !== "LWPOLYLINE") return;
+
+  console.log(`🔍 === COMPREHENSIVE LWPOLYLINE DIAGNOSTIC ${index + 1} ===`);
+
+  // Cast to expected types
+  const lwpoly = entity as ILwpolylineEntity;
+  const entityWithShape = entity as IEntity & { shape?: boolean | number };
+
+  // Log all possible properties
+  console.log(`📋 Raw entity object:`, entity);
+  console.log(`📏 Type: ${entity.type}`);
+  console.log(`🔗 Shape property (ILwpolylineEntity): ${lwpoly.shape}`);
+  console.log(`🔗 Shape property (generic cast): ${entityWithShape.shape}`);
+  console.log(`📍 Vertices count: ${lwpoly.vertices?.length || "undefined"}`);
+  console.log(`📍 Vertices array:`, lwpoly.vertices);
+
+  // Test geometric closure
+  if (lwpoly.vertices && lwpoly.vertices.length > 2) {
+    const first = lwpoly.vertices[0];
+    const last = lwpoly.vertices[lwpoly.vertices.length - 1];
+    const distance = Math.sqrt(
+      Math.pow(first.x - last.x, 2) + Math.pow(first.y - last.y, 2)
+    );
+    console.log(`📐 First vertex: {x: ${first.x}, y: ${first.y}}`);
+    console.log(`📐 Last vertex: {x: ${last.x}, y: ${last.y}}`);
+    console.log(`📏 Geometric closure distance: ${distance}`);
+    console.log(`✅ Geometrically closed: ${distance < 0.01}`);
+  }
+
+  // Test all detection methods
+  const detectionResults = {
+    shapeFlag: lwpoly.shape === true,
+    shapeAsNumber: typeof lwpoly.shape === "number" && lwpoly.shape === 1,
+    shapeAny: Boolean(lwpoly.shape),
+    genericShape: Boolean(entityWithShape.shape),
+  };
+  console.log(`🎯 Detection results:`, detectionResults);
+
+  // Test type guards
+  console.log(`🔍 isPolylineEntity result: ${isPolylineEntity(entity)}`);
+  console.log(`🔍 isLwpolylineEntity result: ${isLwpolylineEntity(entity)}`);
+
+  console.log(`🔍 === END LWPOLYLINE DIAGNOSTIC ${index + 1} ===\n`);
+}
+
 export function processDxf(
   dxfContent: string,
   material: THREE.Material
@@ -1388,23 +1421,53 @@ export function processDxf(
   // Check for unclosed polylines that might form closed shapes
   let unclosedPolylineCount = 0;
   let closedPolylineCount = 0;
-  entities.forEach((entity) => {
+  entities.forEach((entity, index) => {
+    // Run comprehensive diagnostic for LWPOLYLINE entities
+    debugLwpolylineEntity(entity, index);
+
     if (entity.type === "POLYLINE" || entity.type === "LWPOLYLINE") {
       const poly = entity as IPolylineEntity;
+      console.log(`=== ${entity.type} Entity ${index + 1} Debug ===`);
+      console.log(`shape property:`, poly.shape);
+      console.log(`vertices count:`, poly.vertices?.length || 0);
+      console.log(`entity:`, entity);
+
       if (poly.shape === true) {
         closedPolylineCount++;
+        console.log(`${entity.type} ${index + 1}: CLOSED by shape flag`);
       } else if (poly.vertices && poly.vertices.length > 2) {
         const first = poly.vertices[0];
         const last = poly.vertices[poly.vertices.length - 1];
         const distance = Math.sqrt(
           Math.pow(first.x - last.x, 2) + Math.pow(first.y - last.y, 2)
         );
+        console.log(`${entity.type} ${index + 1}: First vertex:`, first);
+        console.log(`${entity.type} ${index + 1}: Last vertex:`, last);
+        console.log(
+          `${entity.type} ${index + 1}: Distance between first/last:`,
+          distance
+        );
+
         if (distance < 0.01) {
           closedPolylineCount++;
+          console.log(
+            `${entity.type} ${index + 1}: CLOSED by geometric closure`
+          );
         } else {
           unclosedPolylineCount++;
+          console.log(
+            `${entity.type} ${index + 1}: OPEN - no closure detected`
+          );
         }
+      } else {
+        unclosedPolylineCount++;
+        console.log(
+          `${entity.type} ${
+            index + 1
+          }: OPEN - insufficient vertices or missing vertices`
+        );
       }
+      console.log(`=== End ${entity.type} Entity ${index + 1} Debug ===`);
     }
   });
   console.log(
@@ -1452,10 +1515,23 @@ export function processDxf(
   console.log(`=== END DXF DEBUG ===`);
 
   // Find closed loops using enhanced approach: DxfAnalyzer connectivity + proper ordering
+  console.log(`=== CALLING DxfAnalyzer ===`);
   const closedLoops = createOrderedLoopsFromConnectivity({ entities });
   console.log(
     `Found ${closedLoops.length} total closed loops with proper ordering`
   );
+  console.log(`Closed loops details:`);
+  closedLoops.forEach((loop, i) => {
+    console.log(
+      `Loop ${i + 1}: ${loop.entities.length} entities, area=${Math.abs(
+        loop.area
+      ).toFixed(2)}`
+    );
+    loop.entities.forEach((entity, j) => {
+      console.log(`  Entity ${j + 1}: ${entity.type}`);
+    });
+  });
+  console.log(`=== END DxfAnalyzer RESULTS ===`);
 
   // Separate outer loops from holes
   const { outerLoops, holes } = separateOuterLoopsFromHoles(closedLoops);
