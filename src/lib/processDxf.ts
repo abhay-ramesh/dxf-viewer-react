@@ -372,187 +372,60 @@ function separateOuterLoopsFromHoles(
 
   if (loops.length === 0) return { outerLoops, holes };
 
-  // Sort loops by area (largest first) - outer boundaries are typically larger
-  const sortedLoops = [...loops].sort(
-    (a, b) => Math.abs(b.area) - Math.abs(a.area)
-  );
+  console.log("=== GEOMETRIC NESTING ANALYSIS ===");
+  console.log(`Total loops to classify: ${loops.length}`);
 
-  console.log("=== ENHANCED CONTAINMENT ANALYSIS ===");
-  console.log(`Total loops to classify: ${sortedLoops.length}`);
+  // Calculate nesting level for each loop using proper containment relationships
+  const nestingData = loops.map((loop, index) => {
+    let nestingLevel = 0;
 
-  // Calculate area statistics for better classification
-  const areas = sortedLoops.map((loop) => Math.abs(loop.area));
-  const totalArea = areas.reduce((sum, area) => sum + area, 0);
-  const avgArea = totalArea / areas.length;
-  const medianArea = areas[Math.floor(areas.length / 2)];
-  const maxArea = Math.max(...areas);
-  const minArea = Math.min(...areas);
-
-  console.log(
-    `Area stats: max=${maxArea.toFixed(2)}, min=${minArea.toFixed(
-      2
-    )}, avg=${avgArea.toFixed(2)}, median=${medianArea.toFixed(2)}`
-  );
-
-  // More conservative classification - start with larger loops as outer loops
-  // Then only classify as holes if we have strong evidence
-
-  for (let i = 0; i < sortedLoops.length; i++) {
-    const currentLoop = sortedLoops[i];
-    const currentArea = Math.abs(currentLoop.area);
-    let isHole = false;
-    let containmentCount = 0;
-
-    // Test containment against ALL previously classified outer loops
-    for (const outerLoop of outerLoops) {
-      if (isLoopContainedInLoopEnhanced(currentLoop, outerLoop)) {
-        containmentCount++;
-        isHole = true;
-        console.log(
-          `Loop ${i + 1}: Contained in outer loop (area ${Math.abs(
-            outerLoop.area
-          ).toFixed(2)})`
-        );
+    // Count how many other loops completely contain this loop
+    for (let j = 0; j < loops.length; j++) {
+      if (j !== index && isLoopContainedInLoopEnhanced(loop, loops[j])) {
+        nestingLevel++;
       }
     }
 
-    // If no clear containment, use spline-optimized area-based heuristics
-    if (!isHole && outerLoops.length > 0) {
-      const areaRatio = currentArea / maxArea;
+    console.log(
+      `Loop ${index + 1}: Nesting level ${nestingLevel}, Area: ${Math.abs(
+        loop.area
+      ).toFixed(2)}`
+    );
 
-      // For splines, be more aggressive about classifying as holes (expect 170/202 = 84% holes)
-      // Classify as hole if smaller than largest loop
-      if (areaRatio < 0.3 && outerLoops.length >= 3) {
-        isHole = true;
-        console.log(
-          `Loop ${
-            i + 1
-          }: Classified as hole by spline area heuristic (ratio=${areaRatio.toFixed(
-            4
-          )})`
-        );
-      }
-      // More aggressive hole classification for medium-sized loops
-      else if (outerLoops.length >= 5) {
-        const outerAreas = outerLoops.map((loop) => Math.abs(loop.area));
-        const avgOuterArea =
-          outerAreas.reduce((sum, area) => sum + area, 0) / outerAreas.length;
+    return { loop, nestingLevel, index };
+  });
 
-        if (currentArea < avgOuterArea * 0.5) {
-          isHole = true;
-          console.log(
-            `Loop ${
-              i + 1
-            }: Classified as hole by spline relative size heuristic`
-          );
-        }
-      }
-      // If we don't have many outer loops yet but expect mostly holes, bias toward holes
-      else if (outerLoops.length >= 15 && areaRatio < 0.7) {
-        isHole = true;
-        console.log(
-          `Loop ${i + 1}: Classified as hole by spline majority heuristic`
-        );
-      }
-    }
+  // Geometric classification rule:
+  // - Even nesting levels (0, 2, 4...) = Outer boundaries (fills)
+  // - Odd nesting levels (1, 3, 5...) = Holes
+  for (const { loop, nestingLevel, index } of nestingData) {
+    const isHole = nestingLevel % 2 === 1;
 
-    // Apply winding order heuristic only as confirmation, not primary classifier
-    if (isHole && outerLoops.length > 3) {
-      const currentWinding = isClockwise(currentLoop.vertices);
-      const outerWindings = outerLoops.map((loop) =>
-        isClockwise(loop.vertices)
-      );
-      const majorityClockwise =
-        outerWindings.filter(Boolean).length > outerWindings.length / 2;
-
-      // If winding matches outer loops, this might actually be an outer loop
-      if (currentWinding === majorityClockwise && containmentCount === 0) {
-        isHole = false;
-        console.log(
-          `Loop ${
-            i + 1
-          }: Reclassified as outer loop due to matching winding order`
-        );
-      }
-    }
-
-    // Final classification with bias toward outer loops for better balance
     if (isHole) {
-      holes.push(currentLoop);
+      holes.push(loop);
       console.log(
-        `Loop ${i + 1}: HOLE - Area: ${currentArea.toFixed(2)}, Entities: ${
-          currentLoop.entities.length
-        }`
+        `Loop ${
+          index + 1
+        }: HOLE (nesting level ${nestingLevel}) - Area: ${Math.abs(
+          loop.area
+        ).toFixed(2)}`
       );
     } else {
-      outerLoops.push(currentLoop);
+      outerLoops.push(loop);
       console.log(
-        `Loop ${i + 1}: OUTER - Area: ${currentArea.toFixed(2)}, Entities: ${
-          currentLoop.entities.length
-        }`
+        `Loop ${
+          index + 1
+        }: FILL (nesting level ${nestingLevel}) - Area: ${Math.abs(
+          loop.area
+        ).toFixed(2)}`
       );
     }
   }
 
-  // Post-process: Expected 32 filled + 170 holes = 202 total for splines
-  const expectedFills = 32;
-  const expectedHoles = 170;
-  const expectedRatio = expectedHoles / expectedFills; // 170/32 = 5.31
-  const currentRatio = holes.length / Math.max(outerLoops.length, 1);
-
-  console.log(`\n=== POST-PROCESSING FOR SPLINES ===`);
   console.log(
-    `Expected: ${expectedFills} fills + ${expectedHoles} holes (ratio: ${expectedRatio.toFixed(
-      2
-    )})`
+    `Final geometric classification: ${outerLoops.length} fills, ${holes.length} holes`
   );
-  console.log(
-    `Current: ${outerLoops.length} fills + ${
-      holes.length
-    } holes (ratio: ${currentRatio.toFixed(2)})`
-  );
-
-  // If we have too few holes (should be majority), reclassify outer loops as holes
-  if (
-    currentRatio < expectedRatio * 0.5 &&
-    outerLoops.length > expectedFills * 1.5
-  ) {
-    console.log(
-      `Too few holes (${holes.length}) vs outer loops (${outerLoops.length}) - reclassifying outer loops as holes`
-    );
-
-    // Sort outer loops by area and reclassify the smallest ones as holes
-    const sortedOuters = outerLoops.sort(
-      (a, b) => Math.abs(a.area) - Math.abs(b.area)
-    );
-    const targetHoles = Math.min(
-      expectedHoles,
-      Math.floor(sortedLoops.length * 0.85)
-    ); // Target ~85% as holes
-    const numToReclassify = Math.min(
-      targetHoles - holes.length,
-      sortedOuters.length - expectedFills
-    );
-
-    for (let i = 0; i < numToReclassify && i < sortedOuters.length; i++) {
-      const outer = sortedOuters[i];
-      const outerIndex = outerLoops.indexOf(outer);
-      if (outerIndex !== -1) {
-        outerLoops.splice(outerIndex, 1);
-        holes.push(outer);
-        console.log(
-          `Reclassified small outer loop (area ${Math.abs(outer.area).toFixed(
-            2
-          )}) as hole`
-        );
-      }
-    }
-  }
-
-  console.log(
-    `Final classification: ${outerLoops.length} outer loops, ${holes.length} holes`
-  );
-  console.log("=== END ENHANCED ANALYSIS ===");
+  console.log("=== END GEOMETRIC ANALYSIS ===");
 
   return { outerLoops, holes };
 }
