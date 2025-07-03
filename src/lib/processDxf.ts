@@ -1529,7 +1529,8 @@ function groupHolesWithOuterLoops(
 
 export function processDxf(
   dxfContent: string,
-  material: THREE.Material
+  material: THREE.Material,
+  showShapeColors: boolean = true
 ): ProcessDxfResult {
   // Parse DXF
   let entities: IEntity[] = [];
@@ -1797,85 +1798,94 @@ export function processDxf(
   // Group holes with their containing outer loops for geometric hole creation
   const groupedShapes = groupHolesWithOuterLoops(outerLoops, holes);
 
-  // Create shapes with geometric holes
-  groupedShapes.forEach((shapeGroup, index) => {
-    try {
-      // Create geometry with actual geometric holes
-      const shapeWithHolesGeometry = createShapeWithHoles(
-        shapeGroup.outerLoop,
-        shapeGroup.containedHoles
-      );
-
-      if (shapeWithHolesGeometry) {
-        // Generate contrasting color for this shape
-        const fillColor = generateContrastingColor(index);
-
-        // Create filled material
-        const fillMaterial = new THREE.MeshBasicMaterial({
-          color: fillColor,
-          opacity: 0.8,
-          transparent: true,
-          side: THREE.DoubleSide,
-        });
-
-        // Create mesh with geometric holes
-        const shapeMesh = new THREE.Mesh(shapeWithHolesGeometry, fillMaterial);
-        shapeMesh.userData = {
-          entityType: "SHAPE_WITH_HOLES",
-          shapeIndex: index,
-          outerArea: shapeGroup.outerLoop.area,
-          holeCount: shapeGroup.containedHoles.length,
-          totalHoleArea: shapeGroup.containedHoles.reduce(
-            (sum, hole) => sum + hole.area,
-            0
-          ),
-        };
-
-        // Slightly offset behind the lines to avoid z-fighting
-        shapeMesh.position.z = -0.001;
-
-        objects.push(shapeMesh);
-
-        console.log(
-          `Created shape ${index + 1} with ${
-            shapeGroup.containedHoles.length
-          } geometric holes, color #${fillColor.toString(16).padStart(6, "0")}`
-        );
-      }
-    } catch (error) {
-      console.error(
-        `Failed to create shape with holes for group ${index}:`,
-        error
-      );
-
-      // Fallback: create without holes if geometric hole creation fails
+  // Create shapes with geometric holes only if showShapeColors is enabled
+  if (showShapeColors) {
+    groupedShapes.forEach((shapeGroup, index) => {
       try {
-        const fallbackGeometry = createClosedShapeFromEntities(
-          shapeGroup.outerLoop
+        // Create geometry with actual geometric holes
+        const shapeWithHolesGeometry = createShapeWithHoles(
+          shapeGroup.outerLoop,
+          shapeGroup.containedHoles
         );
-        if (fallbackGeometry) {
-          const fallbackMaterial = new THREE.MeshBasicMaterial({
-            color: generateContrastingColor(index),
-            opacity: 0.5,
+
+        if (shapeWithHolesGeometry) {
+          // Generate contrasting color for this shape
+          const fillColor = generateContrastingColor(index);
+
+          // Create filled material
+          const fillMaterial = new THREE.MeshBasicMaterial({
+            color: fillColor,
+            opacity: 0.8,
             transparent: true,
             side: THREE.DoubleSide,
           });
-          const fallbackMesh = new THREE.Mesh(
-            fallbackGeometry,
-            fallbackMaterial
+
+          // Create mesh with geometric holes
+          const shapeMesh = new THREE.Mesh(
+            shapeWithHolesGeometry,
+            fillMaterial
           );
-          fallbackMesh.position.z = -0.001;
-          objects.push(fallbackMesh);
-          console.log(`Created fallback shape ${index + 1} without holes`);
+          shapeMesh.userData = {
+            entityType: "SHAPE_WITH_HOLES",
+            shapeIndex: index,
+            outerArea: shapeGroup.outerLoop.area,
+            holeCount: shapeGroup.containedHoles.length,
+            totalHoleArea: shapeGroup.containedHoles.reduce(
+              (sum, hole) => sum + hole.area,
+              0
+            ),
+          };
+
+          // Slightly offset behind the lines to avoid z-fighting
+          shapeMesh.position.z = -0.001;
+
+          objects.push(shapeMesh);
+
+          console.log(
+            `Created shape ${index + 1} with ${
+              shapeGroup.containedHoles.length
+            } geometric holes, color #${fillColor
+              .toString(16)
+              .padStart(6, "0")}`
+          );
         }
-      } catch (fallbackError) {
+      } catch (error) {
         console.error(
-          `Fallback also failed for group ${index}:`,
-          fallbackError
+          `Failed to create shape with holes for group ${index}:`,
+          error
         );
+
+        // Fallback: create without holes if geometric hole creation fails
+        try {
+          const fallbackGeometry = createClosedShapeFromEntities(
+            shapeGroup.outerLoop
+          );
+          if (fallbackGeometry) {
+            const fallbackMaterial = new THREE.MeshBasicMaterial({
+              color: generateContrastingColor(index),
+              opacity: 0.5,
+              transparent: true,
+              side: THREE.DoubleSide,
+            });
+            const fallbackMesh = new THREE.Mesh(
+              fallbackGeometry,
+              fallbackMaterial
+            );
+            fallbackMesh.position.z = -0.001;
+            objects.push(fallbackMesh);
+            console.log(`Created fallback shape ${index + 1} without holes`);
+          }
+        } catch (fallbackError) {
+          console.error(
+            `Fallback also failed for group ${index}:`,
+            fallbackError
+          );
+        }
       }
-    }
-  });
+    });
+  } else {
+    console.log("Shape colors disabled - skipping shape creation");
+  }
 
   // Create group and add objects
   const group = new THREE.Group();
@@ -1884,11 +1894,15 @@ export function processDxf(
 
   // Update stats
   if (outerLoops.length > 0 || holes.length > 0) {
-    stats["SHAPES_WITH_HOLES"] = groupedShapes.length;
-    stats["TOTAL_HOLES"] = holes.length;
     stats["TOTAL_CLOSED_LOOPS"] = closedLoops.length;
-    stats["GEOMETRIC_HOLES"] = holes.length;
-    stats["DETECTION_METHOD"] = "GEOMETRIC_HOLES";
+    if (showShapeColors) {
+      stats["SHAPES_WITH_HOLES"] = groupedShapes.length;
+      stats["TOTAL_HOLES"] = holes.length;
+      stats["GEOMETRIC_HOLES"] = holes.length;
+      stats["DETECTION_METHOD"] = "GEOMETRIC_HOLES";
+    } else {
+      stats["DETECTION_METHOD"] = "DISABLED";
+    }
   }
 
   return { group, stats, entities, parseError };

@@ -10,9 +10,10 @@ function App() {
   const [viewerSettings, setViewerSettings] = useState({
     showGrid: true,
     showAxes: true,
-    showDebugInfo: true,
-    entityColor: "#0000ff",
-    backgroundColor: "#f0f0f0",
+    showDebugInfo: false,
+    showShapeColors: true,
+    entityColor: "#0066cc",
+    backgroundColor: "#f8f9fa",
   });
 
   useEffect(() => {
@@ -110,6 +111,14 @@ function App() {
                 onChange={handleSettingChange("showDebugInfo")}
               />
               Show Debug Info
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={viewerSettings.showShapeColors}
+                onChange={handleSettingChange("showShapeColors")}
+              />
+              Show Shape Colors
             </label>
             <label>
               Entity Color:

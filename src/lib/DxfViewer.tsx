@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-// @ts-expect-error - OrbitControls is not typed
-import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { processDxf } from "./processDxf";
 import { setupCamera } from "./setupCamera";
 import { setupControls } from "./setupControls";
@@ -46,6 +45,7 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
   showGrid = true,
   showAxes = true,
   showDebugInfo = false,
+  showShapeColors = true,
   onLoad,
   onError,
   defaultTool = "pan",
@@ -78,8 +78,8 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
 
   // Process DXF content
   const { group, stats, entities, parseError } = useMemo(
-    () => processDxf(dxfContent, material),
-    [dxfContent, material]
+    () => processDxf(dxfContent, material, showShapeColors),
+    [dxfContent, material, showShapeColors]
   );
 
   // Camera setup - memoized to avoid recalculation

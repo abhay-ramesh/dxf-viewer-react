@@ -1,5 +1,6 @@
 import { IEntity } from "dxf-parser";
 import { Color } from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
 export interface DxfViewerProps {
   /** The DXF file content as a string */
@@ -20,6 +21,8 @@ export interface DxfViewerProps {
   showDebugInfo?: boolean;
   /** Show debug (default: false) */
   showDebug?: boolean;
+  /** Show colored shape fills with geometric holes (default: true) */
+  showShapeColors?: boolean;
   /** Default tool for the viewer */
   defaultTool?: "select" | "pan" | "measure";
   /** Callback when measurement is complete */
@@ -44,7 +47,7 @@ export interface ToolContext {
   renderer: THREE.WebGLRenderer;
   scene: THREE.Scene;
   group: THREE.Group;
-  controls: any; // OrbitControls type
+  controls: OrbitControls;
 }
 
 export interface EntityTypes {
