@@ -1395,6 +1395,138 @@ function debugLwpolylineEntity(entity: IEntity, index: number) {
   console.log(`🔍 === END LWPOLYLINE DIAGNOSTIC ${index + 1} ===\n`);
 }
 
+// Create shape with geometric holes using THREE.js Shape.holes
+function createShapeWithHoles(
+  outerLoop: {
+    entities: IEntity[];
+    vertices: Array<{ x: number; y: number }>;
+    area: number;
+    perimeter: number;
+  },
+  containedHoles: Array<{
+    entities: IEntity[];
+    vertices: Array<{ x: number; y: number }>;
+    area: number;
+    perimeter: number;
+  }>
+): THREE.ShapeGeometry | null {
+  try {
+    // Create main shape from outer loop
+    const mainShape = new THREE.Shape();
+
+    if (outerLoop.vertices.length < 3) return null;
+
+    // Clean vertices to avoid duplicate points
+    const cleanVertices = outerLoop.vertices.filter((vertex, index) => {
+      if (index === 0) return true;
+      const prev = outerLoop.vertices[index - 1];
+      const distance = Math.sqrt(
+        Math.pow(vertex.x - prev.x, 2) + Math.pow(vertex.y - prev.y, 2)
+      );
+      return distance > 0.001;
+    });
+
+    if (cleanVertices.length < 3) return null;
+
+    // Create outer boundary
+    mainShape.moveTo(cleanVertices[0].x, cleanVertices[0].y);
+    for (let i = 1; i < cleanVertices.length; i++) {
+      mainShape.lineTo(cleanVertices[i].x, cleanVertices[i].y);
+    }
+    mainShape.closePath();
+
+    // Add holes to the main shape
+    containedHoles.forEach((hole, holeIndex) => {
+      if (hole.vertices.length < 3) return;
+
+      const holeShape = new THREE.Shape();
+
+      // Clean hole vertices
+      const cleanHoleVertices = hole.vertices.filter((vertex, index) => {
+        if (index === 0) return true;
+        const prev = hole.vertices[index - 1];
+        const distance = Math.sqrt(
+          Math.pow(vertex.x - prev.x, 2) + Math.pow(vertex.y - prev.y, 2)
+        );
+        return distance > 0.001;
+      });
+
+      if (cleanHoleVertices.length < 3) return;
+
+      // Create hole shape (note: holes should be wound opposite to outer shape)
+      holeShape.moveTo(cleanHoleVertices[0].x, cleanHoleVertices[0].y);
+      for (let i = 1; i < cleanHoleVertices.length; i++) {
+        holeShape.lineTo(cleanHoleVertices[i].x, cleanHoleVertices[i].y);
+      }
+      holeShape.closePath();
+
+      // Add to main shape's holes array
+      mainShape.holes.push(holeShape);
+
+      console.log(
+        `Added hole ${holeIndex + 1} with ${
+          cleanHoleVertices.length
+        } vertices to main shape`
+      );
+    });
+
+    console.log(`Created shape with ${containedHoles.length} geometric holes`);
+    return new THREE.ShapeGeometry(mainShape);
+  } catch (error) {
+    console.warn("Failed to create shape with holes:", error);
+    return null;
+  }
+}
+
+// Find which holes are contained within each outer loop
+function groupHolesWithOuterLoops(
+  outerLoops: Array<{
+    entities: IEntity[];
+    vertices: Array<{ x: number; y: number }>;
+    area: number;
+    perimeter: number;
+  }>,
+  holes: Array<{
+    entities: IEntity[];
+    vertices: Array<{ x: number; y: number }>;
+    area: number;
+    perimeter: number;
+  }>
+): Array<{
+  outerLoop: (typeof outerLoops)[0];
+  containedHoles: typeof holes;
+}> {
+  const groupedShapes: Array<{
+    outerLoop: (typeof outerLoops)[0];
+    containedHoles: typeof holes;
+  }> = [];
+
+  outerLoops.forEach((outerLoop, outerIndex) => {
+    const containedHoles: typeof holes = [];
+
+    // Find holes contained within this outer loop
+    holes.forEach((hole, holeIndex) => {
+      if (isLoopContainedInLoopEnhanced(hole, outerLoop)) {
+        containedHoles.push(hole);
+        console.log(
+          `Hole ${holeIndex + 1} is contained in outer loop ${outerIndex + 1}`
+        );
+      }
+    });
+
+    groupedShapes.push({
+      outerLoop,
+      containedHoles,
+    });
+
+    console.log(
+      `Outer loop ${outerIndex + 1} contains ${containedHoles.length} holes`
+    );
+  });
+
+  return groupedShapes;
+}
+
 export function processDxf(
   dxfContent: string,
   material: THREE.Material
@@ -1662,80 +1794,86 @@ export function processDxf(
     }
   });
 
-  // Process outer loops - create filled shapes
-  outerLoops.forEach((loop, index) => {
+  // Group holes with their containing outer loops for geometric hole creation
+  const groupedShapes = groupHolesWithOuterLoops(outerLoops, holes);
+
+  // Create shapes with geometric holes
+  groupedShapes.forEach((shapeGroup, index) => {
     try {
-      // Create filled geometry
-      const shapeGeometry = createClosedShapeFromEntities(loop);
-      if (shapeGeometry) {
+      // Create geometry with actual geometric holes
+      const shapeWithHolesGeometry = createShapeWithHoles(
+        shapeGroup.outerLoop,
+        shapeGroup.containedHoles
+      );
+
+      if (shapeWithHolesGeometry) {
         // Generate contrasting color for this shape
         const fillColor = generateContrastingColor(index);
 
-        // Create filled material with some transparency
+        // Create filled material
         const fillMaterial = new THREE.MeshBasicMaterial({
           color: fillColor,
-          opacity: 0.7,
+          opacity: 0.8,
           transparent: true,
           side: THREE.DoubleSide,
         });
 
-        // Create filled mesh
-        const fillMesh = new THREE.Mesh(shapeGeometry, fillMaterial);
-        fillMesh.userData = {
-          entityType: "CLOSED_LOOP_FILL",
-          loopIndex: index,
-          area: loop.area,
-          perimeter: loop.perimeter,
+        // Create mesh with geometric holes
+        const shapeMesh = new THREE.Mesh(shapeWithHolesGeometry, fillMaterial);
+        shapeMesh.userData = {
+          entityType: "SHAPE_WITH_HOLES",
+          shapeIndex: index,
+          outerArea: shapeGroup.outerLoop.area,
+          holeCount: shapeGroup.containedHoles.length,
+          totalHoleArea: shapeGroup.containedHoles.reduce(
+            (sum, hole) => sum + hole.area,
+            0
+          ),
         };
 
-        // Slightly offset the fill behind the lines to avoid z-fighting
-        fillMesh.position.z = -0.001;
+        // Slightly offset behind the lines to avoid z-fighting
+        shapeMesh.position.z = -0.001;
 
-        objects.push(fillMesh);
+        objects.push(shapeMesh);
 
         console.log(
-          `Created filled shape ${index + 1} with color #${fillColor
-            .toString(16)
-            .padStart(6, "0")}`
+          `Created shape ${index + 1} with ${
+            shapeGroup.containedHoles.length
+          } geometric holes, color #${fillColor.toString(16).padStart(6, "0")}`
         );
       }
     } catch (error) {
-      console.error(`Failed to create filled shape for loop ${index}:`, error);
-    }
-  });
+      console.error(
+        `Failed to create shape with holes for group ${index}:`,
+        error
+      );
 
-  // Process holes - create transparent/background fills to cut out areas
-  holes.forEach((hole, index) => {
-    try {
-      // Create hole geometry
-      const holeGeometry = createClosedShapeFromEntities(hole);
-      if (holeGeometry) {
-        // Create transparent/background material to "cut out" the hole
-        const holeMaterial = new THREE.MeshBasicMaterial({
-          color: 0xffffff, // White background color
-          opacity: 0.95, // Nearly opaque to effectively cut out the area
-          transparent: true,
-          side: THREE.DoubleSide,
-        });
-
-        // Create hole mesh
-        const holeMesh = new THREE.Mesh(holeGeometry, holeMaterial);
-        holeMesh.userData = {
-          entityType: "HOLE_FILL",
-          holeIndex: index,
-          area: hole.area,
-          perimeter: hole.perimeter,
-        };
-
-        // Position hole slightly above the main fills to create cutout effect
-        holeMesh.position.z = 0.0005;
-
-        objects.push(holeMesh);
-
-        console.log(`Created hole cutout ${index + 1}`);
+      // Fallback: create without holes if geometric hole creation fails
+      try {
+        const fallbackGeometry = createClosedShapeFromEntities(
+          shapeGroup.outerLoop
+        );
+        if (fallbackGeometry) {
+          const fallbackMaterial = new THREE.MeshBasicMaterial({
+            color: generateContrastingColor(index),
+            opacity: 0.5,
+            transparent: true,
+            side: THREE.DoubleSide,
+          });
+          const fallbackMesh = new THREE.Mesh(
+            fallbackGeometry,
+            fallbackMaterial
+          );
+          fallbackMesh.position.z = -0.001;
+          objects.push(fallbackMesh);
+          console.log(`Created fallback shape ${index + 1} without holes`);
+        }
+      } catch (fallbackError) {
+        console.error(
+          `Fallback also failed for group ${index}:`,
+          fallbackError
+        );
       }
-    } catch (error) {
-      console.error(`Failed to create hole cutout for hole ${index}:`, error);
     }
   });
 
@@ -1746,11 +1884,11 @@ export function processDxf(
 
   // Update stats
   if (outerLoops.length > 0 || holes.length > 0) {
-    stats["FILLED_SHAPES"] = outerLoops.length;
-    stats["HOLE_CUTOUTS"] = holes.length;
+    stats["SHAPES_WITH_HOLES"] = groupedShapes.length;
+    stats["TOTAL_HOLES"] = holes.length;
     stats["TOTAL_CLOSED_LOOPS"] = closedLoops.length;
-    stats["TOTAL_FILLS"] = outerLoops.length + holes.length;
-    stats["DETECTION_METHOD"] = "TRACED";
+    stats["GEOMETRIC_HOLES"] = holes.length;
+    stats["DETECTION_METHOD"] = "GEOMETRIC_HOLES";
   }
 
   return { group, stats, entities, parseError };
