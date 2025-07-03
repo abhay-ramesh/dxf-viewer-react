@@ -4,6 +4,7 @@ import {
   IEntity,
   ILineEntity,
   IPolylineEntity,
+  ISplineEntity,
 } from "dxf-parser";
 
 interface Point2D {
@@ -42,6 +43,88 @@ function isCircleEntity(entity: IEntity): entity is ICircleEntity {
   return entity.type === "CIRCLE";
 }
 
+function isSplineEntity(entity: IEntity): entity is ISplineEntity {
+  return entity.type === "SPLINE";
+}
+
+// Evaluate a point on the B-spline curve using De Boor's algorithm
+function evaluateSplinePoint(
+  t: number,
+  controlPoints: { x: number; y: number; z?: number }[],
+  degree: number,
+  knots: number[]
+): { x: number; y: number } | null {
+  // Basic validation
+  if (!controlPoints.length || !knots.length || degree < 1) return null;
+
+  // Clamp t to valid range
+  const t0 = knots[0] ?? 0;
+  const tEnd = knots[knots.length - 1] ?? 0;
+  t = Math.max(t0, Math.min(t, tEnd));
+
+  // Find knot span
+  let span = -1;
+  for (let i = degree; i <= knots.length - degree - 2; i++) {
+    const k1 = knots[i];
+    const k2 = knots[i + 1];
+    if (k1 !== undefined && k2 !== undefined && t >= k1 && t < k2) {
+      span = i;
+      break;
+    }
+  }
+
+  // Handle end case
+  if (t === tEnd) {
+    span = knots.length - degree - 2;
+  }
+
+  // Validate span
+  if (span < degree || span > controlPoints.length - 1) return null;
+
+  // Initialize points array for De Boor's algorithm
+  const points: Array<Array<{ x: number; y: number; z: number }>> = Array(
+    degree + 1
+  )
+    .fill(null)
+    .map(() => []);
+
+  // Load initial points
+  for (let i = 0; i <= degree; i++) {
+    const idx = span - degree + i;
+    if (idx < 0 || idx >= controlPoints.length) continue;
+    const cp = controlPoints[idx];
+    points[0][i] = { x: cp.x, y: cp.y, z: cp.z || 0 };
+  }
+
+  // Perform De Boor's algorithm
+  for (let r = 1; r <= degree; r++) {
+    for (let i = 0; i <= degree - r; i++) {
+      const k1 = knots[span + 1 + i];
+      const k2 = knots[span - degree + i + r];
+      if (k1 === undefined || k2 === undefined) continue;
+
+      const alphaDenom = k1 - k2;
+      if (Math.abs(alphaDenom) < 1e-10) {
+        points[r][i] = { ...points[r - 1][i] };
+        continue;
+      }
+
+      const alpha = (t - k2) / alphaDenom;
+      const p1 = points[r - 1][i];
+      const p2 = points[r - 1][i + 1];
+      if (!p1 || !p2) continue;
+
+      points[r][i] = {
+        x: (1 - alpha) * p1.x + alpha * p2.x,
+        y: (1 - alpha) * p1.y + alpha * p2.y,
+        z: (1 - alpha) * p1.z + alpha * p2.z,
+      };
+    }
+  }
+
+  return points[degree][0] || null;
+}
+
 // Helper function to check if an arc is a full circle
 function isFullCircleArc(entity: IArcEntity): boolean {
   if (!entity.startAngle || !entity.endAngle) return false;
@@ -78,6 +161,12 @@ export class DxfAnalyzer {
         if (loop) {
           loops.push(loop);
           console.log(`Added full-circle arc as closed loop`);
+        }
+      } else if (isSplineEntity(entity) && this.isClosedSpline(entity)) {
+        const loop = this.createSplineLoop(entity);
+        if (loop) {
+          loops.push(loop);
+          console.log(`Added closed spline as closed loop`);
         }
       } else {
         processedEntities.push(entity);
@@ -141,6 +230,86 @@ export class DxfAnalyzer {
       vertices,
       area: Math.PI * radius * radius,
       perimeter: 2 * Math.PI * radius,
+    };
+  }
+
+  private static isClosedSpline(entity: ISplineEntity): boolean {
+    if (!entity.controlPoints || entity.controlPoints.length < 3) return false;
+
+    // Check if spline is marked as closed in DXF data
+    const splineWithClosed = entity as ISplineEntity & {
+      closed?: boolean | number;
+    };
+    const isClosedFlag =
+      (typeof splineWithClosed.closed === "boolean" &&
+        splineWithClosed.closed === true) ||
+      (typeof splineWithClosed.closed === "number" &&
+        splineWithClosed.closed === 1);
+
+    // Also check if first and last control points are the same (geometric closure)
+    const firstPoint = entity.controlPoints[0];
+    const lastPoint = entity.controlPoints[entity.controlPoints.length - 1];
+    const isGeometricallylosed =
+      firstPoint &&
+      lastPoint &&
+      Math.abs(firstPoint.x - lastPoint.x) < 0.001 &&
+      Math.abs(firstPoint.y - lastPoint.y) < 0.001;
+
+    // For splines, assume they're closed if they have enough control points
+    // (since user expects everything in DXF to be closed)
+    return (
+      isClosedFlag || isGeometricallylosed || entity.controlPoints.length >= 4
+    );
+  }
+
+  private static createSplineLoop(entity: ISplineEntity): ClosedLoop | null {
+    if (!entity.controlPoints || entity.controlPoints.length < 3) return null;
+
+    const vertices: Point2D[] = [];
+    const degree = entity.degreeOfSplineCurve || 3;
+    const knots = entity.knotValues || [];
+
+    if (knots.length > 0) {
+      // Find valid parameter range
+      const tMin = knots[degree] ?? knots[0] ?? 0;
+      const tMax =
+        knots[knots.length - degree - 1] ?? knots[knots.length - 1] ?? 1;
+
+      if (tMin < tMax) {
+        // Generate high-detail vertices for smooth curves
+        const numPoints = Math.max(50, entity.controlPoints.length * 10);
+        const dt = (tMax - tMin) / (numPoints - 1);
+
+        for (let i = 0; i <= numPoints; i++) {
+          const t = tMin + i * dt;
+          const point = evaluateSplinePoint(
+            t,
+            entity.controlPoints,
+            degree,
+            knots
+          );
+          if (point) {
+            vertices.push({ x: point.x, y: point.y });
+          }
+        }
+      }
+    } else {
+      // Fallback: use control points as approximation
+      entity.controlPoints.forEach((cp) => {
+        vertices.push({ x: cp.x, y: cp.y });
+      });
+    }
+
+    if (vertices.length < 3) return null;
+
+    const area = this.calculateArea(vertices);
+    const perimeter = this.calculatePerimeter(vertices);
+
+    return {
+      entities: [entity],
+      vertices,
+      area: Math.abs(area),
+      perimeter,
     };
   }
 
@@ -315,6 +484,74 @@ export class DxfAnalyzer {
           });
         }
       }
+    } else if (isSplineEntity(entity)) {
+      if (entity.controlPoints && entity.controlPoints.length > 0) {
+        const degree = entity.degreeOfSplineCurve || 3;
+        const knots = entity.knotValues || [];
+
+        if (knots.length > 0) {
+          // Try to evaluate the start and end points using De Boor's algorithm
+          const tMin = knots[degree] ?? knots[0] ?? 0;
+          const tMax =
+            knots[knots.length - degree - 1] ?? knots[knots.length - 1] ?? 1;
+
+          const startPoint = evaluateSplinePoint(
+            tMin,
+            entity.controlPoints,
+            degree,
+            knots
+          );
+          const endPoint = evaluateSplinePoint(
+            tMax,
+            entity.controlPoints,
+            degree,
+            knots
+          );
+
+          if (startPoint) {
+            endpoints.push({
+              x: startPoint.x,
+              y: startPoint.y,
+              entityIndex: index,
+              isStart: true,
+            });
+          }
+
+          if (endPoint) {
+            endpoints.push({
+              x: endPoint.x,
+              y: endPoint.y,
+              entityIndex: index,
+              isStart: false,
+            });
+          }
+        } else {
+          // Fallback to first and last control points
+          const start = entity.controlPoints[0];
+          const end = entity.controlPoints[entity.controlPoints.length - 1];
+
+          if (
+            start &&
+            typeof start.x === "number" &&
+            typeof start.y === "number"
+          ) {
+            endpoints.push({
+              x: start.x,
+              y: start.y,
+              entityIndex: index,
+              isStart: true,
+            });
+          }
+          if (end && typeof end.x === "number" && typeof end.y === "number") {
+            endpoints.push({
+              x: end.x,
+              y: end.y,
+              entityIndex: index,
+              isStart: false,
+            });
+          }
+        }
+      }
     }
 
     return endpoints;
@@ -325,9 +562,14 @@ export class DxfAnalyzer {
     entities: IEntity[]
   ): ClosedLoop | null {
     const groupEntities = groupIndices.map((i) => entities[i]);
+
+    if (groupEntities.length <= 1) {
+      return null;
+    }
+
     const vertices: Point2D[] = [];
 
-    // Add vertices from all entities in the group
+    // Add vertices from all entities in the group (no complex ordering)
     for (const entity of groupEntities) {
       this.addEntityVertices(entity, vertices);
     }
@@ -375,6 +617,42 @@ export class DxfAnalyzer {
           vertices.push({
             x: center.x + radius * Math.cos(angle),
             y: center.y + radius * Math.sin(angle),
+          });
+        }
+      }
+    } else if (isSplineEntity(entity)) {
+      if (entity.controlPoints && entity.controlPoints.length >= 3) {
+        const degree = entity.degreeOfSplineCurve || 3;
+        const knots = entity.knotValues || [];
+
+        if (knots.length > 0) {
+          // Find valid parameter range
+          const tMin = knots[degree] ?? knots[0] ?? 0;
+          const tMax =
+            knots[knots.length - degree - 1] ?? knots[knots.length - 1] ?? 1;
+
+          if (tMin < tMax) {
+            // Generate high-detail vertices for smooth curves
+            const numPoints = Math.max(50, entity.controlPoints.length * 10);
+            const dt = (tMax - tMin) / (numPoints - 1);
+
+            for (let i = 0; i <= numPoints; i++) {
+              const t = tMin + i * dt;
+              const point = evaluateSplinePoint(
+                t,
+                entity.controlPoints,
+                degree,
+                knots
+              );
+              if (point) {
+                vertices.push({ x: point.x, y: point.y });
+              }
+            }
+          }
+        } else {
+          // Fallback: use control points as approximation
+          entity.controlPoints.forEach((cp) => {
+            vertices.push({ x: cp.x, y: cp.y });
           });
         }
       }

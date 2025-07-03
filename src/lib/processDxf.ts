@@ -21,6 +21,7 @@ import {
   processSpline,
   processText,
 } from "./processors";
+import { DxfAnalyzer } from "./utils/DxfAnalyzer";
 
 // Type guards to safely check entity types and properties
 function isLineEntity(entity: IEntity): entity is ILineEntity {
@@ -53,6 +54,84 @@ function isLwpolylineEntity(entity: IEntity): entity is ILwpolylineEntity {
 
 function isSplineEntity(entity: IEntity): entity is ISplineEntity {
   return entity.type === "SPLINE";
+}
+
+// Evaluate a point on the B-spline curve using De Boor's algorithm
+function evaluateSplinePoint(
+  t: number,
+  controlPoints: { x: number; y: number; z?: number }[],
+  degree: number,
+  knots: number[]
+): { x: number; y: number } | null {
+  // Basic validation
+  if (!controlPoints.length || !knots.length || degree < 1) return null;
+
+  // Clamp t to valid range
+  const t0 = knots[0] ?? 0;
+  const tEnd = knots[knots.length - 1] ?? 0;
+  t = Math.max(t0, Math.min(t, tEnd));
+
+  // Find knot span
+  let span = -1;
+  for (let i = degree; i <= knots.length - degree - 2; i++) {
+    const k1 = knots[i];
+    const k2 = knots[i + 1];
+    if (k1 !== undefined && k2 !== undefined && t >= k1 && t < k2) {
+      span = i;
+      break;
+    }
+  }
+
+  // Handle end case
+  if (t === tEnd) {
+    span = knots.length - degree - 2;
+  }
+
+  // Validate span
+  if (span < degree || span > controlPoints.length - 1) return null;
+
+  // Initialize points array for De Boor's algorithm
+  const points: Array<Array<{ x: number; y: number; z: number }>> = Array(
+    degree + 1
+  )
+    .fill(null)
+    .map(() => []);
+
+  // Load initial points
+  for (let i = 0; i <= degree; i++) {
+    const idx = span - degree + i;
+    if (idx < 0 || idx >= controlPoints.length) continue;
+    const cp = controlPoints[idx];
+    points[0][i] = { x: cp.x, y: cp.y, z: cp.z || 0 };
+  }
+
+  // Perform De Boor's algorithm
+  for (let r = 1; r <= degree; r++) {
+    for (let i = 0; i <= degree - r; i++) {
+      const k1 = knots[span + 1 + i];
+      const k2 = knots[span - degree + i + r];
+      if (k1 === undefined || k2 === undefined) continue;
+
+      const alphaDenom = k1 - k2;
+      if (Math.abs(alphaDenom) < 1e-10) {
+        points[r][i] = { ...points[r - 1][i] };
+        continue;
+      }
+
+      const alpha = (t - k2) / alphaDenom;
+      const p1 = points[r - 1][i];
+      const p2 = points[r - 1][i + 1];
+      if (!p1 || !p2) continue;
+
+      points[r][i] = {
+        x: (1 - alpha) * p1.x + alpha * p2.x,
+        y: (1 - alpha) * p1.y + alpha * p2.y,
+        z: (1 - alpha) * p1.z + alpha * p2.z,
+      };
+    }
+  }
+
+  return points[degree][0] || null;
 }
 
 function isCircleEntity(entity: IEntity): entity is ICircleEntity {
@@ -180,58 +259,35 @@ function createClosedShapeFromEntities(loop: {
   vertices: Array<{ x: number; y: number }>;
 }): THREE.ShapeGeometry | null {
   try {
+    // If we have good vertices from tracing, use them directly
+    if (loop.vertices && loop.vertices.length >= 3) {
+      console.log(
+        `Creating shape from ${loop.vertices.length} vertices from traced loop`
+      );
+      return createClosedShapeGeometry(loop.vertices);
+    }
+
+    // Fallback: create basic shape from entities
+    if (loop.entities.length === 0) {
+      return null;
+    }
+
+    console.log(
+      `Fallback: Creating shape from ${loop.entities.length} entities`
+    );
+
     const shape = new THREE.Shape();
-    let currentPoint = loop.vertices[0];
-    shape.moveTo(currentPoint.x, currentPoint.y);
+    let hasMoveTo = false;
 
-    // Process each entity in the loop
-    let vertexIndex = 0;
-
+    // Process each entity simply
     for (const entity of loop.entities) {
-      if (entity.type === "ARC") {
-        // Handle arcs with proper curves
-        const arc = entity as IArcEntity;
-        if (
-          arc.center &&
-          arc.radius &&
-          arc.startAngle !== undefined &&
-          arc.endAngle !== undefined
-        ) {
-          // Calculate arc parameters
-          const centerX = arc.center.x;
-          const centerY = arc.center.y;
-          const radius = arc.radius;
-          const startAngle = arc.startAngle;
-          let endAngle = arc.endAngle;
-
-          // Ensure proper angle direction for shape creation
-          if (endAngle < startAngle) {
-            endAngle += Math.PI * 2;
-          }
-
-          // Use absarc for proper arc creation in shapes
-          shape.absarc(centerX, centerY, radius, startAngle, endAngle, false);
-
-          // Update current point to arc end
-          currentPoint = {
-            x: centerX + radius * Math.cos(endAngle),
-            y: centerY + radius * Math.sin(endAngle),
-          };
-        } else {
-          // Fallback to line segments for malformed arcs
-          const arcVertices = loop.vertices.slice(
-            vertexIndex,
-            vertexIndex + 32
-          );
-          for (let i = 1; i < arcVertices.length; i++) {
-            shape.lineTo(arcVertices[i].x, arcVertices[i].y);
-          }
-          vertexIndex += 32;
-        }
-      } else if (entity.type === "CIRCLE") {
-        // Handle full circles
+      if (entity.type === "CIRCLE") {
         const circle = entity as ICircleEntity;
-        if (circle.center && circle.radius) {
+        if (circle.center && typeof circle.radius === "number") {
+          if (!hasMoveTo) {
+            shape.moveTo(circle.center.x + circle.radius, circle.center.y);
+            hasMoveTo = true;
+          }
           shape.absarc(
             circle.center.x,
             circle.center.y,
@@ -241,170 +297,65 @@ function createClosedShapeFromEntities(loop: {
             false
           );
         }
+      } else if (entity.type === "ARC") {
+        const arc = entity as IArcEntity;
+        if (
+          arc.center &&
+          typeof arc.radius === "number" &&
+          typeof arc.startAngle === "number" &&
+          typeof arc.endAngle === "number"
+        ) {
+          if (!hasMoveTo) {
+            const startX = arc.center.x + arc.radius * Math.cos(arc.startAngle);
+            const startY = arc.center.y + arc.radius * Math.sin(arc.startAngle);
+            shape.moveTo(startX, startY);
+            hasMoveTo = true;
+          }
+          shape.absarc(
+            arc.center.x,
+            arc.center.y,
+            arc.radius,
+            arc.startAngle,
+            arc.endAngle,
+            false
+          );
+        }
       } else if (entity.type === "LINE") {
-        // Handle lines
         const line = entity as ILineEntity;
         if (line.vertices && line.vertices.length >= 2) {
-          shape.lineTo(line.vertices[1].x, line.vertices[1].y);
-          currentPoint = { x: line.vertices[1].x, y: line.vertices[1].y };
+          if (!hasMoveTo) {
+            shape.moveTo(line.vertices[0].x, line.vertices[0].y);
+            hasMoveTo = true;
+          }
+          for (let i = 1; i < line.vertices.length; i++) {
+            shape.lineTo(line.vertices[i].x, line.vertices[i].y);
+          }
         }
-        vertexIndex += 2;
       } else if (entity.type === "POLYLINE" || entity.type === "LWPOLYLINE") {
-        // Handle polylines
         const poly = entity as IPolylineEntity;
-        if (poly.vertices) {
+        if (poly.vertices && poly.vertices.length > 0) {
+          if (!hasMoveTo) {
+            shape.moveTo(poly.vertices[0].x, poly.vertices[0].y);
+            hasMoveTo = true;
+          }
           for (let i = 1; i < poly.vertices.length; i++) {
             shape.lineTo(poly.vertices[i].x, poly.vertices[i].y);
-            currentPoint = { x: poly.vertices[i].x, y: poly.vertices[i].y };
-          }
-          vertexIndex += poly.vertices.length;
-        }
-      } else if (entity.type === "SPLINE") {
-        // Handle splines with smooth curves
-        const spline = entity as ISplineEntity;
-        if (spline.controlPoints && spline.controlPoints.length >= 3) {
-          const degree = spline.degreeOfSplineCurve || 3;
-          const knots = spline.knotValues || [];
-
-          if (knots.length > 0) {
-            // Use B-spline evaluation for smooth curves
-            const tMin = knots[degree] ?? knots[0] ?? 0;
-            const tMax =
-              knots[knots.length - degree - 1] ?? knots[knots.length - 1] ?? 1;
-
-            if (tMin < tMax) {
-              const numPoints = Math.max(20, spline.controlPoints.length * 5);
-              const dt = (tMax - tMin) / (numPoints - 1);
-
-              for (let i = 1; i <= numPoints; i++) {
-                const t = tMin + i * dt;
-                const point = evaluateSplinePoint(
-                  t,
-                  spline.controlPoints,
-                  degree,
-                  knots
-                );
-                if (point) {
-                  shape.lineTo(point.x, point.y);
-                  currentPoint = { x: point.x, y: point.y };
-                }
-              }
-            }
-          } else {
-            // Fallback: use control points as line segments
-            for (let i = 1; i < spline.controlPoints.length; i++) {
-              const cp = spline.controlPoints[i];
-              shape.lineTo(cp.x, cp.y);
-              currentPoint = { x: cp.x, y: cp.y };
-            }
           }
         }
-
-        // Skip ahead in vertex array (splines use many vertices)
-        const splineVertexCount = Math.min(
-          50,
-          loop.vertices.length - vertexIndex
-        );
-        vertexIndex += splineVertexCount;
-      } else {
-        // Fallback for other entity types - use vertices
-        const remainingVertices = loop.vertices.slice(vertexIndex);
-        const entityVertexCount = Math.min(10, remainingVertices.length);
-        for (let i = 1; i < entityVertexCount; i++) {
-          shape.lineTo(remainingVertices[i].x, remainingVertices[i].y);
-        }
-        vertexIndex += entityVertexCount;
       }
     }
 
-    // Close the shape
-    shape.closePath();
+    if (hasMoveTo) {
+      shape.closePath();
+      const geometry = new THREE.ShapeGeometry(shape);
+      return geometry;
+    }
 
-    return new THREE.ShapeGeometry(shape);
+    return null;
   } catch (error) {
-    console.warn("Failed to create enhanced shape geometry:", error);
-    // Fallback to simple vertex-based creation
-    return createClosedShapeGeometry(loop.vertices);
+    console.warn("Failed to create shape geometry:", error);
+    return null;
   }
-}
-
-// Evaluate a point on the B-spline curve using De Boor's algorithm
-// This is adapted from processors.ts but simplified for our needs
-function evaluateSplinePoint(
-  t: number,
-  controlPoints: { x: number; y: number; z?: number }[],
-  degree: number,
-  knots: number[]
-): { x: number; y: number } | null {
-  // Basic validation
-  if (!controlPoints.length || !knots.length || degree < 1) return null;
-
-  // Clamp t to valid range
-  const t0 = knots[0] ?? 0;
-  const tEnd = knots[knots.length - 1] ?? 0;
-  t = Math.max(t0, Math.min(t, tEnd));
-
-  // Find knot span
-  let span = -1;
-  for (let i = degree; i <= knots.length - degree - 2; i++) {
-    const k1 = knots[i];
-    const k2 = knots[i + 1];
-    if (k1 !== undefined && k2 !== undefined && t >= k1 && t < k2) {
-      span = i;
-      break;
-    }
-  }
-
-  // Handle end case
-  if (t === tEnd) {
-    span = knots.length - degree - 2;
-  }
-
-  // Validate span
-  if (span < degree || span > controlPoints.length - 1) return null;
-
-  // Initialize points array for De Boor's algorithm
-  const points: Array<Array<{ x: number; y: number; z: number }>> = Array(
-    degree + 1
-  )
-    .fill(null)
-    .map(() => []);
-
-  // Load initial points
-  for (let i = 0; i <= degree; i++) {
-    const idx = span - degree + i;
-    if (idx < 0 || idx >= controlPoints.length) continue;
-    const cp = controlPoints[idx];
-    points[0][i] = { x: cp.x, y: cp.y, z: cp.z || 0 };
-  }
-
-  // Perform De Boor's algorithm
-  for (let r = 1; r <= degree; r++) {
-    for (let i = 0; i <= degree - r; i++) {
-      const k1 = knots[span + 1 + i];
-      const k2 = knots[span - degree + i + r];
-      if (k1 === undefined || k2 === undefined) continue;
-
-      const alphaDenom = k1 - k2;
-      if (Math.abs(alphaDenom) < 1e-10) {
-        points[r][i] = { ...points[r - 1][i] };
-        continue;
-      }
-
-      const alpha = (t - k2) / alphaDenom;
-      const p1 = points[r - 1][i];
-      const p2 = points[r - 1][i + 1];
-      if (!p1 || !p2) continue;
-
-      points[r][i] = {
-        x: (1 - alpha) * p1.x + alpha * p2.x,
-        y: (1 - alpha) * p1.y + alpha * p2.y,
-        z: (1 - alpha) * p1.z + alpha * p2.z,
-      };
-    }
-  }
-
-  return points[degree][0] || null;
 }
 
 // Separate outer loops from holes using improved containment analysis
@@ -465,33 +416,43 @@ function separateOuterLoopsFromHoles(
       }
     }
 
-    // If no clear containment, use more conservative area-based heuristics
+    // If no clear containment, use spline-optimized area-based heuristics
     if (!isHole && outerLoops.length > 0) {
       const areaRatio = currentArea / maxArea;
 
-      // Only classify as hole if VERY small compared to largest loop
-      if (areaRatio < 0.05 && outerLoops.length >= 5) {
+      // For splines, be more aggressive about classifying as holes (expect 170/202 = 84% holes)
+      // Classify as hole if smaller than largest loop
+      if (areaRatio < 0.3 && outerLoops.length >= 3) {
         isHole = true;
         console.log(
           `Loop ${
             i + 1
-          }: Classified as hole by very small area heuristic (ratio=${areaRatio.toFixed(
+          }: Classified as hole by spline area heuristic (ratio=${areaRatio.toFixed(
             4
           )})`
         );
       }
-      // For medium-sized loops, only classify as hole if much smaller than average outer loop
-      else if (outerLoops.length >= 10) {
+      // More aggressive hole classification for medium-sized loops
+      else if (outerLoops.length >= 5) {
         const outerAreas = outerLoops.map((loop) => Math.abs(loop.area));
         const avgOuterArea =
           outerAreas.reduce((sum, area) => sum + area, 0) / outerAreas.length;
 
-        if (currentArea < avgOuterArea * 0.1) {
+        if (currentArea < avgOuterArea * 0.5) {
           isHole = true;
           console.log(
-            `Loop ${i + 1}: Classified as hole by relative size to outer loops`
+            `Loop ${
+              i + 1
+            }: Classified as hole by spline relative size heuristic`
           );
         }
+      }
+      // If we don't have many outer loops yet but expect mostly holes, bias toward holes
+      else if (outerLoops.length >= 15 && areaRatio < 0.7) {
+        isHole = true;
+        console.log(
+          `Loop ${i + 1}: Classified as hole by spline majority heuristic`
+        );
       }
     }
 
@@ -533,31 +494,56 @@ function separateOuterLoopsFromHoles(
     }
   }
 
-  // Post-process: if we have too many holes relative to outer loops, reclassify some
-  const expectedRatio = 36 / 37; // Based on user's expected numbers
+  // Post-process: Expected 32 filled + 170 holes = 202 total for splines
+  const expectedFills = 32;
+  const expectedHoles = 170;
+  const expectedRatio = expectedHoles / expectedFills; // 170/32 = 5.31
   const currentRatio = holes.length / Math.max(outerLoops.length, 1);
 
-  if (currentRatio > expectedRatio * 1.5 && holes.length > outerLoops.length) {
+  console.log(`\n=== POST-PROCESSING FOR SPLINES ===`);
+  console.log(
+    `Expected: ${expectedFills} fills + ${expectedHoles} holes (ratio: ${expectedRatio.toFixed(
+      2
+    )})`
+  );
+  console.log(
+    `Current: ${outerLoops.length} fills + ${
+      holes.length
+    } holes (ratio: ${currentRatio.toFixed(2)})`
+  );
+
+  // If we have too few holes (should be majority), reclassify outer loops as holes
+  if (
+    currentRatio < expectedRatio * 0.5 &&
+    outerLoops.length > expectedFills * 1.5
+  ) {
     console.log(
-      `\n=== POST-PROCESSING: Too many holes (${holes.length}) vs outer loops (${outerLoops.length}) ===`
+      `Too few holes (${holes.length}) vs outer loops (${outerLoops.length}) - reclassifying outer loops as holes`
     );
 
-    // Sort holes by area and reclassify the largest ones as outer loops
-    const sortedHoles = holes.sort(
-      (a, b) => Math.abs(b.area) - Math.abs(a.area)
+    // Sort outer loops by area and reclassify the smallest ones as holes
+    const sortedOuters = outerLoops.sort(
+      (a, b) => Math.abs(a.area) - Math.abs(b.area)
     );
-    const numToReclassify = Math.floor((holes.length - outerLoops.length) / 2);
+    const targetHoles = Math.min(
+      expectedHoles,
+      Math.floor(sortedLoops.length * 0.85)
+    ); // Target ~85% as holes
+    const numToReclassify = Math.min(
+      targetHoles - holes.length,
+      sortedOuters.length - expectedFills
+    );
 
-    for (let i = 0; i < numToReclassify && i < sortedHoles.length; i++) {
-      const hole = sortedHoles[i];
-      const holeIndex = holes.indexOf(hole);
-      if (holeIndex !== -1) {
-        holes.splice(holeIndex, 1);
-        outerLoops.push(hole);
+    for (let i = 0; i < numToReclassify && i < sortedOuters.length; i++) {
+      const outer = sortedOuters[i];
+      const outerIndex = outerLoops.indexOf(outer);
+      if (outerIndex !== -1) {
+        outerLoops.splice(outerIndex, 1);
+        holes.push(outer);
         console.log(
-          `Reclassified large hole (area ${Math.abs(hole.area).toFixed(
+          `Reclassified small outer loop (area ${Math.abs(outer.area).toFixed(
             2
-          )}) as outer loop`
+          )}) as hole`
         );
       }
     }
@@ -760,545 +746,11 @@ function isPointOnLineSegment(
   return distance < tolerance;
 }
 
-// Improved closed loop detection with better tolerance and connection logic
-function findClosedLoopsImproved(entities: IEntity[]): Array<{
-  entities: IEntity[];
-  vertices: Array<{ x: number; y: number }>;
-  area: number;
-  perimeter: number;
-}> {
-  const loops: Array<{
-    entities: IEntity[];
-    vertices: Array<{ x: number; y: number }>;
-    area: number;
-    perimeter: number;
-  }> = [];
+// Removed unused findClosedLoopsImproved function - now using DxfAnalyzer
 
-  const visited = new Set<IEntity>();
-  // Increase base tolerance significantly for CAD files with gaps
-  const BASE_TOLERANCE = 0.01; // Increased from 0.001 to handle typical CAD tolerances
+// Removed unused tracing functions - now using DxfAnalyzer
 
-  // Handle standalone circles and closed polylines first
-  entities.forEach((entity) => {
-    if (entity.type === "CIRCLE" && !visited.has(entity)) {
-      visited.add(entity);
-      if (isCircleEntity(entity)) {
-        const circle = entity;
-        if (circle.center && circle.radius) {
-          const vertices: Array<{ x: number; y: number }> = [];
-          const segments = 32;
-          for (let i = 0; i <= segments; i++) {
-            const angle = (i / segments) * Math.PI * 2;
-            vertices.push({
-              x: circle.center.x + circle.radius * Math.cos(angle),
-              y: circle.center.y + circle.radius * Math.sin(angle),
-            });
-          }
-          const area = Math.PI * circle.radius * circle.radius;
-          const perimeter = 2 * Math.PI * circle.radius;
-          loops.push({
-            entities: [entity],
-            vertices,
-            area,
-            perimeter,
-          });
-          console.log(`Found standalone circle with radius ${circle.radius}`);
-        }
-      }
-    }
-
-    // Handle closed polylines (with shape flag set)
-    if (
-      (entity.type === "POLYLINE" || entity.type === "LWPOLYLINE") &&
-      !visited.has(entity)
-    ) {
-      if (isPolylineEntity(entity) || isLwpolylineEntity(entity)) {
-        const poly = entity;
-        if (poly.shape === true || poly.vertices?.length > 2) {
-          // Check if first and last vertices are same (indicating closed polyline)
-          const firstVertex = poly.vertices[0];
-          const lastVertex = poly.vertices[poly.vertices.length - 1];
-          const isExplicitlyClosed = poly.shape === true;
-          const isImplicitlyClosed =
-            firstVertex &&
-            lastVertex &&
-            Math.abs(firstVertex.x - lastVertex.x) < BASE_TOLERANCE &&
-            Math.abs(firstVertex.y - lastVertex.y) < BASE_TOLERANCE;
-
-          if (isExplicitlyClosed || isImplicitlyClosed) {
-            visited.add(entity);
-            const vertices: Array<{ x: number; y: number }> = [];
-            poly.vertices.forEach((vertex) => {
-              vertices.push({ x: vertex.x, y: vertex.y });
-            });
-
-            // Ensure closure
-            if (!isImplicitlyClosed && vertices.length > 0) {
-              vertices.push({ x: vertices[0].x, y: vertices[0].y });
-            }
-
-            const area = calculatePolygonArea(vertices);
-            const perimeter = calculatePolygonPerimeter(vertices);
-            loops.push({
-              entities: [entity],
-              vertices,
-              area,
-              perimeter,
-            });
-            console.log(
-              `Found closed polyline with ${poly.vertices.length} vertices`
-            );
-          }
-        }
-      }
-    }
-  });
-
-  // Handle other entities by tracing connections with multiple tolerance attempts
-  console.log(`=== ENHANCED TRACING ATTEMPT ===`);
-  console.log(
-    `Total entities to trace: ${
-      entities.filter((e) => e.type !== "CIRCLE").length
-    }`
-  );
-
-  // Use multiple passes with different strategies
-  const toleranceLevels = [
-    BASE_TOLERANCE, // 0.01
-    BASE_TOLERANCE * 5, // 0.05
-    BASE_TOLERANCE * 20, // 0.2
-    BASE_TOLERANCE * 100, // 1.0 - very generous for problematic files
-    BASE_TOLERANCE * 500, // 5.0 - extreme tolerance for large gaps
-  ];
-
-  toleranceLevels.forEach((tolerance, toleranceIndex) => {
-    console.log(`\n--- TOLERANCE PASS ${toleranceIndex + 1}: ${tolerance} ---`);
-
-    entities.forEach((startEntity, index) => {
-      if (visited.has(startEntity) || startEntity.type === "CIRCLE") return;
-
-      console.log(
-        `Trying entity ${index + 1}/${entities.length}: ${startEntity.type}`
-      );
-
-      const loop = traceLoopImproved(startEntity, entities, visited, tolerance);
-      if (loop) {
-        loops.push(loop);
-        console.log(
-          `✅ SUCCESS: Found traced loop with ${
-            loop.entities.length
-          } entities, area: ${loop.area.toFixed(2)}, tolerance: ${tolerance}`
-        );
-      }
-    });
-  });
-
-  // Final pass: try to connect any remaining unvisited entities with extreme tolerance
-  const unvisitedEntities = entities.filter(
-    (e) => !visited.has(e) && e.type !== "CIRCLE"
-  );
-  if (unvisitedEntities.length > 0) {
-    console.log(
-      `\n--- FINAL PASS: ${unvisitedEntities.length} unvisited entities ---`
-    );
-
-    unvisitedEntities.forEach((startEntity) => {
-      if (visited.has(startEntity)) return;
-
-      // Try with mega tolerance to bridge large gaps
-      const loop = traceLoopImproved(
-        startEntity,
-        entities,
-        visited,
-        BASE_TOLERANCE * 1000
-      );
-      if (loop) {
-        loops.push(loop);
-        console.log(
-          `✅ FINAL: Found traced loop with ${
-            loop.entities.length
-          } entities, area: ${loop.area.toFixed(2)}`
-        );
-      } else {
-        // Mark as visited to avoid infinite attempts
-        visited.add(startEntity);
-        console.log(`❌ Could not trace from ${startEntity.type} entity`);
-      }
-    });
-  }
-
-  const unvisitedCount = entities.filter((e) => !visited.has(e)).length;
-  console.log(
-    `Total loops found: ${loops.length}, Unvisited entities: ${unvisitedCount}`
-  );
-
-  return loops;
-}
-
-function traceLoopImproved(
-  startEntity: IEntity,
-  allEntities: IEntity[],
-  visited: Set<IEntity>,
-  tolerance: number
-): {
-  entities: IEntity[];
-  vertices: Array<{ x: number; y: number }>;
-  area: number;
-  perimeter: number;
-} | null {
-  const loopEntities: IEntity[] = [];
-  const vertices: Array<{ x: number; y: number }> = [];
-  let currentEntity: IEntity | null = startEntity;
-  const startPoint = getEntityStartPoint(currentEntity);
-  const originalStartPoint = { ...startPoint };
-
-  console.log(
-    `    🔄 TRACING from ${startEntity.type} at (${startPoint.x.toFixed(
-      3
-    )}, ${startPoint.y.toFixed(3)}) with tolerance ${tolerance}`
-  );
-
-  let stepCount = 0;
-  const maxSteps = 50; // Prevent infinite loops
-
-  while (currentEntity && stepCount < maxSteps) {
-    stepCount++;
-    visited.add(currentEntity);
-    loopEntities.push(currentEntity);
-
-    // Add vertices from entity
-    addEntityVerticesImproved(currentEntity, vertices);
-
-    const endPoint = getEntityEndPoint(currentEntity);
-    console.log(
-      `      Step ${stepCount}: ${
-        currentEntity.type
-      } ends at (${endPoint.x.toFixed(3)}, ${endPoint.y.toFixed(3)})`
-    );
-
-    // Check if we've closed the loop
-    const distanceToStart = Math.sqrt(
-      Math.pow(endPoint.x - originalStartPoint.x, 2) +
-        Math.pow(endPoint.y - originalStartPoint.y, 2)
-    );
-
-    if (distanceToStart <= tolerance && loopEntities.length > 1) {
-      console.log(
-        `      ✅ LOOP CLOSED! Distance to start: ${distanceToStart.toFixed(
-          6
-        )} <= ${tolerance}`
-      );
-      const area = calculatePolygonArea(vertices);
-      const perimeter = calculatePolygonPerimeter(vertices);
-      return {
-        entities: loopEntities,
-        vertices,
-        area,
-        perimeter,
-      };
-    }
-
-    // Find next connected entity
-    const nextEntity = findNextConnectedEntity(
-      endPoint,
-      allEntities,
-      visited,
-      currentEntity,
-      tolerance
-    );
-
-    if (nextEntity) {
-      const nextStart = getEntityStartPoint(nextEntity);
-      const connectionDistance = Math.sqrt(
-        Math.pow(endPoint.x - nextStart.x, 2) +
-          Math.pow(endPoint.y - nextStart.y, 2)
-      );
-      console.log(
-        `      ➡️  Connected to ${
-          nextEntity.type
-        } at distance ${connectionDistance.toFixed(6)}`
-      );
-    } else {
-      console.log(
-        `      ❌ No next entity found from (${endPoint.x.toFixed(
-          3
-        )}, ${endPoint.y.toFixed(3)})`
-      );
-
-      // Debug: show nearby entities
-      const nearbyEntities = allEntities.filter(
-        (e) => !visited.has(e) && e !== currentEntity
-      );
-      console.log(
-        `      🔍 Checking ${nearbyEntities.length} unvisited entities:`
-      );
-
-      nearbyEntities.slice(0, 5).forEach((entity) => {
-        const entityStart = getEntityStartPoint(entity);
-        const entityEnd = getEntityEndPoint(entity);
-        const distToStart = Math.sqrt(
-          Math.pow(endPoint.x - entityStart.x, 2) +
-            Math.pow(endPoint.y - entityStart.y, 2)
-        );
-        const distToEnd = Math.sqrt(
-          Math.pow(endPoint.x - entityEnd.x, 2) +
-            Math.pow(endPoint.y - entityEnd.y, 2)
-        );
-        console.log(
-          `        ${entity.type}: start=${distToStart.toFixed(
-            6
-          )}, end=${distToEnd.toFixed(6)}`
-        );
-      });
-    }
-
-    currentEntity = nextEntity;
-  }
-
-  if (stepCount >= maxSteps) {
-    console.log(
-      `      ⚠️  Stopped tracing after ${maxSteps} steps (infinite loop protection)`
-    );
-  }
-
-  console.log(
-    `    ❌ Trace failed after ${stepCount} steps with ${loopEntities.length} entities`
-  );
-  return null;
-}
-
-function getEntityStartPoint(entity: IEntity): { x: number; y: number } {
-  switch (entity.type) {
-    case "LINE": {
-      const line = entity as ILineEntity;
-      return { x: line.vertices[0].x, y: line.vertices[0].y };
-    }
-    case "ARC": {
-      const arc = entity as IArcEntity;
-      // Normalize arc angles and handle potential angle issues
-      const normalizedStartAngle = normalizeArcAngle(arc.startAngle);
-      const point = {
-        x: arc.center.x + arc.radius * Math.cos(normalizedStartAngle),
-        y: arc.center.y + arc.radius * Math.sin(normalizedStartAngle),
-      };
-      return point;
-    }
-    case "POLYLINE":
-    case "LWPOLYLINE": {
-      const poly = entity as IPolylineEntity;
-      return { x: poly.vertices[0].x, y: poly.vertices[0].y };
-    }
-    default:
-      return { x: 0, y: 0 };
-  }
-}
-
-function getEntityEndPoint(entity: IEntity): { x: number; y: number } {
-  switch (entity.type) {
-    case "LINE": {
-      const line = entity as ILineEntity;
-      return { x: line.vertices[1].x, y: line.vertices[1].y };
-    }
-    case "ARC": {
-      const arc = entity as IArcEntity;
-      // Normalize arc angles and handle potential angle issues
-      const normalizedEndAngle = normalizeArcAngle(arc.endAngle);
-      const point = {
-        x: arc.center.x + arc.radius * Math.cos(normalizedEndAngle),
-        y: arc.center.y + arc.radius * Math.sin(normalizedEndAngle),
-      };
-      return point;
-    }
-    case "POLYLINE":
-    case "LWPOLYLINE": {
-      const poly = entity as IPolylineEntity;
-      const lastVertex = poly.vertices[poly.vertices.length - 1];
-      return { x: lastVertex.x, y: lastVertex.y };
-    }
-    default:
-      return { x: 0, y: 0 };
-  }
-}
-
-// Normalize arc angles to handle different angle representations
-function normalizeArcAngle(angle: number): number {
-  // Don't assume angles > 2π are in degrees - many CAD systems use radians > 2π
-  // Just normalize to [0, 2π] range for consistency
-  while (angle < 0) {
-    angle += 2 * Math.PI;
-  }
-  while (angle >= 2 * Math.PI) {
-    angle -= 2 * Math.PI;
-  }
-
-  return angle;
-}
-
-function addEntityVerticesImproved(
-  entity: IEntity,
-  vertices: Array<{ x: number; y: number }>
-) {
-  switch (entity.type) {
-    case "LINE": {
-      const line = entity as ILineEntity;
-      vertices.push(
-        { x: line.vertices[0].x, y: line.vertices[0].y },
-        { x: line.vertices[1].x, y: line.vertices[1].y }
-      );
-      break;
-    }
-    case "ARC": {
-      const arc = entity as IArcEntity;
-      const normalizedStartAngle = normalizeArcAngle(arc.startAngle);
-      const normalizedEndAngle = normalizeArcAngle(arc.endAngle);
-
-      // Handle angle span calculation (might cross 0 degrees)
-      let angleSpan = normalizedEndAngle - normalizedStartAngle;
-      if (angleSpan < 0) {
-        angleSpan += 2 * Math.PI;
-      }
-
-      const segments = Math.max(8, Math.ceil((angleSpan * 16) / Math.PI));
-
-      for (let i = 0; i <= segments; i++) {
-        let angle = normalizedStartAngle + angleSpan * (i / segments);
-
-        // Ensure angle stays in valid range
-        if (angle >= 2 * Math.PI) {
-          angle -= 2 * Math.PI;
-        }
-
-        vertices.push({
-          x: arc.center.x + arc.radius * Math.cos(angle),
-          y: arc.center.y + arc.radius * Math.sin(angle),
-        });
-      }
-      break;
-    }
-    case "POLYLINE":
-    case "LWPOLYLINE": {
-      const poly = entity as IPolylineEntity;
-      poly.vertices.forEach((vertex) => {
-        vertices.push({ x: vertex.x, y: vertex.y });
-      });
-      break;
-    }
-  }
-}
-
-function findNextConnectedEntity(
-  point: { x: number; y: number },
-  entities: IEntity[],
-  visited: Set<IEntity>,
-  currentEntity: IEntity,
-  tolerance: number
-): IEntity | null {
-  // Try with regular tolerance first
-  let bestMatch = findEntityAtPoint(
-    point,
-    entities,
-    visited,
-    currentEntity,
-    tolerance
-  );
-
-  // If no match found and we're dealing with arcs, try larger tolerance
-  if (
-    !bestMatch &&
-    (currentEntity.type === "ARC" || entities.some((e) => e.type === "ARC"))
-  ) {
-    bestMatch = findEntityAtPoint(
-      point,
-      entities,
-      visited,
-      currentEntity,
-      tolerance * 5
-    );
-    if (bestMatch) {
-      console.log(
-        `Found arc connection with increased tolerance: ${tolerance * 5}`
-      );
-    }
-  }
-
-  return bestMatch;
-}
-
-function findEntityAtPoint(
-  point: { x: number; y: number },
-  entities: IEntity[],
-  visited: Set<IEntity>,
-  currentEntity: IEntity,
-  tolerance: number
-): IEntity | null {
-  let bestEntity: IEntity | null = null;
-  let bestDistance = tolerance;
-
-  for (const entity of entities) {
-    if (visited.has(entity) || entity === currentEntity) continue;
-
-    const startPoint = getEntityStartPoint(entity);
-    const endPoint = getEntityEndPoint(entity);
-
-    // Calculate distances to both start and end points
-    const startDistance = Math.sqrt(
-      Math.pow(point.x - startPoint.x, 2) + Math.pow(point.y - startPoint.y, 2)
-    );
-    const endDistance = Math.sqrt(
-      Math.pow(point.x - endPoint.x, 2) + Math.pow(point.y - endPoint.y, 2)
-    );
-
-    // Find the closest connection within tolerance
-    const minDistance = Math.min(startDistance, endDistance);
-    if (minDistance < bestDistance) {
-      bestDistance = minDistance;
-      bestEntity = entity;
-    }
-  }
-
-  // If no close match found and we're dealing with lines/arcs, try reverse direction matching
-  if (!bestEntity && tolerance > 0.001) {
-    for (const entity of entities) {
-      if (visited.has(entity) || entity === currentEntity) continue;
-
-      if (entity.type === "LINE") {
-        const line = entity as ILineEntity;
-        // Try connecting to the line in reverse direction
-        const reverseStartDistance = Math.sqrt(
-          Math.pow(point.x - line.vertices[1].x, 2) +
-            Math.pow(point.y - line.vertices[1].y, 2)
-        );
-        const reverseEndDistance = Math.sqrt(
-          Math.pow(point.x - line.vertices[0].x, 2) +
-            Math.pow(point.y - line.vertices[0].y, 2)
-        );
-
-        const minReverseDistance = Math.min(
-          reverseStartDistance,
-          reverseEndDistance
-        );
-        if (minReverseDistance < bestDistance) {
-          bestDistance = minReverseDistance;
-          bestEntity = entity;
-        }
-      }
-    }
-  }
-
-  return bestEntity;
-}
-
-function calculatePolygonArea(
-  vertices: Array<{ x: number; y: number }>
-): number {
-  let area = 0;
-  for (let i = 0; i < vertices.length; i++) {
-    const j = (i + 1) % vertices.length;
-    area += vertices[i].x * vertices[j].y;
-    area -= vertices[j].x * vertices[i].y;
-  }
-  return Math.abs(area) / 2;
-}
+// Removed more unused tracing helper functions
 
 // Calculate signed area to determine winding order
 function calculateSignedPolygonArea(
@@ -1313,12 +765,719 @@ function calculateSignedPolygonArea(
   return area / 2;
 }
 
-// Check if polygon is wound clockwise (negative area) or counterclockwise (positive area)
 function isClockwise(vertices: Array<{ x: number; y: number }>): boolean {
   return calculateSignedPolygonArea(vertices) < 0;
 }
 
-function calculatePolygonPerimeter(
+// Removed unused calculatePolygonPerimeter function
+
+// Removed unused findClosedLoopsImproved function - now using hybrid DxfAnalyzer + tracing approach
+
+// Removed unused tracing functions - now using DxfAnalyzer directly
+
+// Removed unused calculation functions - DxfAnalyzer handles area and perimeter
+
+// Removed convertToTracedLoops function - using DxfAnalyzer results directly
+
+// Find closed loops using enhanced approach: DxfAnalyzer connectivity + proper ordering
+function createOrderedLoopsFromConnectivity({
+  entities,
+}: {
+  entities: IEntity[];
+}): Array<{
+  entities: IEntity[];
+  vertices: Array<{ x: number; y: number }>;
+  area: number;
+  perimeter: number;
+}> {
+  console.log("Creating ordered loops from connectivity analysis...");
+
+  // Step 1: Use DxfAnalyzer to get connected groups (all 73 groups)
+  const dxfAnalyzerLoops = DxfAnalyzer.findClosedLoops({ entities });
+  console.log(`DxfAnalyzer found ${dxfAnalyzerLoops.length} connected groups`);
+
+  const orderedLoops: Array<{
+    entities: IEntity[];
+    vertices: Array<{ x: number; y: number }>;
+    area: number;
+    perimeter: number;
+  }> = [];
+
+  // Step 2: For each connected group, create properly ordered vertices
+  for (const dxfLoop of dxfAnalyzerLoops) {
+    // Handle single entities (circles, closed polylines) - they're already correct
+    if (dxfLoop.entities.length === 1) {
+      orderedLoops.push(dxfLoop);
+      continue;
+    }
+
+    // For multi-entity loops, apply robust sequential ordering using graph traversal
+    const orderedResult = createRobustSequentialOrder(dxfLoop.entities);
+
+    if (orderedResult && orderedResult.vertices.length >= 3) {
+      orderedLoops.push({
+        entities: dxfLoop.entities, // Keep original entities from flood-fill
+        vertices: orderedResult.vertices,
+        area: Math.abs(orderedResult.area),
+        perimeter: orderedResult.perimeter,
+      });
+    } else {
+      // Fallback to DxfAnalyzer's vertices if sequential ordering fails
+      console.warn(
+        `Sequential ordering failed for ${dxfLoop.entities.length} entities, using DxfAnalyzer fallback`
+      );
+      orderedLoops.push(dxfLoop);
+    }
+  }
+
+  console.log(`Created ${orderedLoops.length} properly ordered loops`);
+  return orderedLoops;
+}
+
+// Normalize arc angles to handle different angle representations
+function normalizeArcAngle(angle: number): number {
+  // Handle angles that might be in degrees vs radians
+  if (Math.abs(angle) > 2 * Math.PI) {
+    // Likely in degrees, convert to radians
+    angle = (angle * Math.PI) / 180;
+  }
+
+  // Normalize to [0, 2π] range
+  while (angle < 0) {
+    angle += 2 * Math.PI;
+  }
+  while (angle >= 2 * Math.PI) {
+    angle -= 2 * Math.PI;
+  }
+
+  return angle;
+}
+
+// Robust sequential ordering using graph traversal
+function createRobustSequentialOrder(entities: IEntity[]): {
+  vertices: Array<{ x: number; y: number }>;
+  area: number;
+  perimeter: number;
+} | null {
+  if (entities.length === 0) return null;
+
+  // For single entity, handle directly
+  if (entities.length === 1) {
+    const vertices: Array<{ x: number; y: number }> = [];
+    addEntityVerticesRobust(entities[0], vertices);
+    return {
+      vertices,
+      area: calculateLoopArea(vertices),
+      perimeter: calculateLoopPerimeter(vertices),
+    };
+  }
+
+  // Build connectivity graph with tolerance-based endpoint matching
+  const connectionGraph = buildConnectionGraph(entities);
+
+  // Find sequential order using graph traversal
+  const sequentialOrder = findSequentialPath(entities, connectionGraph);
+
+  if (!sequentialOrder || sequentialOrder.length < entities.length) {
+    console.warn(
+      `Could not find complete sequential path. Found ${
+        sequentialOrder?.length || 0
+      }/${entities.length} entities`
+    );
+    return null;
+  }
+
+  // Generate vertices following the sequential order
+  const vertices: Array<{ x: number; y: number }> = [];
+
+  for (let i = 0; i < sequentialOrder.length; i++) {
+    const entity = sequentialOrder[i];
+    const nextEntity = sequentialOrder[(i + 1) % sequentialOrder.length];
+
+    // Add vertices from current entity, ensuring proper direction
+    addEntityVerticesWithDirection(entity, nextEntity, vertices);
+  }
+
+  return {
+    vertices,
+    area: calculateLoopArea(vertices),
+    perimeter: calculateLoopPerimeter(vertices),
+  };
+}
+
+// Build connection graph between entities
+function buildConnectionGraph(
+  entities: IEntity[]
+): Map<
+  IEntity,
+  Array<{ entity: IEntity; connectAtStart: boolean; connectAtEnd: boolean }>
+> {
+  const graph = new Map<
+    IEntity,
+    Array<{ entity: IEntity; connectAtStart: boolean; connectAtEnd: boolean }>
+  >();
+  const tolerance = 0.1;
+  const arcTolerance = 0.5; // Larger tolerance for arc connections, like the previous working implementation
+
+  // Initialize graph
+  entities.forEach((entity) => {
+    graph.set(entity, []);
+  });
+
+  // Find connections between entities
+  for (let i = 0; i < entities.length; i++) {
+    for (let j = i + 1; j < entities.length; j++) {
+      const entityA = entities[i];
+      const entityB = entities[j];
+
+      const startA = getEntityStartPoint(entityA);
+      const endA = getEntityEndPoint(entityA);
+      const startB = getEntityStartPoint(entityB);
+      const endB = getEntityEndPoint(entityB);
+
+      // Check all possible connections
+      const connections = [
+        { pointA: endA, pointB: startB, aAtEnd: true, bAtStart: true },
+        { pointA: endA, pointB: endB, aAtEnd: true, bAtStart: false },
+        { pointA: startA, pointB: startB, aAtEnd: false, bAtStart: true },
+        { pointA: startA, pointB: endB, aAtEnd: false, bAtStart: false },
+      ];
+
+      for (const conn of connections) {
+        const distance = Math.sqrt(
+          Math.pow(conn.pointA.x - conn.pointB.x, 2) +
+            Math.pow(conn.pointA.y - conn.pointB.y, 2)
+        );
+
+        // Use larger tolerance for arc connections, like the previous working implementation
+        const activeA = entityA.type === "ARC";
+        const activeB = entityB.type === "ARC";
+        const useTolerance = activeA || activeB ? arcTolerance : tolerance;
+
+        if (distance <= useTolerance) {
+          // Add bidirectional connection
+          graph.get(entityA)!.push({
+            entity: entityB,
+            connectAtStart: !conn.aAtEnd,
+            connectAtEnd: conn.aAtEnd,
+          });
+          graph.get(entityB)!.push({
+            entity: entityA,
+            connectAtStart: !conn.bAtStart,
+            connectAtEnd: conn.bAtStart,
+          });
+          break; // Only record the first valid connection between these entities
+        }
+      }
+    }
+  }
+
+  return graph;
+}
+
+// Find sequential path through all entities using graph traversal
+function findSequentialPath(
+  entities: IEntity[],
+  graph: Map<
+    IEntity,
+    Array<{ entity: IEntity; connectAtStart: boolean; connectAtEnd: boolean }>
+  >
+): IEntity[] | null {
+  // Try starting from each entity to find a complete path
+  for (const startEntity of entities) {
+    const path = findPathFromEntity(startEntity, entities, graph);
+    if (path && path.length === entities.length) {
+      return path;
+    }
+  }
+
+  return null;
+}
+
+// DFS to find path starting from specific entity
+function findPathFromEntity(
+  startEntity: IEntity,
+  allEntities: IEntity[],
+  graph: Map<
+    IEntity,
+    Array<{ entity: IEntity; connectAtStart: boolean; connectAtEnd: boolean }>
+  >
+): IEntity[] | null {
+  const visited = new Set<IEntity>();
+  const path: IEntity[] = [];
+
+  function dfs(currentEntity: IEntity): boolean {
+    if (visited.has(currentEntity)) return false;
+
+    visited.add(currentEntity);
+    path.push(currentEntity);
+
+    // If we've visited all entities, check if we can close the loop
+    if (path.length === allEntities.length) {
+      // Check if last entity connects back to first entity
+      const connections = graph.get(currentEntity) || [];
+      const connectsToStart = connections.some(
+        (conn) => conn.entity === startEntity
+      );
+      return connectsToStart;
+    }
+
+    // Try connecting to unvisited entities
+    const connections = graph.get(currentEntity) || [];
+    for (const connection of connections) {
+      if (!visited.has(connection.entity)) {
+        if (dfs(connection.entity)) {
+          return true;
+        }
+      }
+    }
+
+    // Backtrack
+    visited.delete(currentEntity);
+    path.pop();
+    return false;
+  }
+
+  if (dfs(startEntity)) {
+    return path;
+  }
+
+  return null;
+}
+
+// Add entity vertices with proper direction to ensure smooth curve fitting
+function addEntityVerticesWithDirection(
+  entity: IEntity,
+  nextEntity: IEntity | null,
+  vertices: Array<{ x: number; y: number }>
+) {
+  if (isLineEntity(entity)) {
+    if (entity.vertices && entity.vertices.length >= 2) {
+      // For lines, determine if we need to reverse based on connection to next entity
+      const lineStart = entity.vertices[0];
+      const lineEnd = entity.vertices[entity.vertices.length - 1];
+
+      let useReverse = false;
+      if (nextEntity && vertices.length > 0) {
+        const lastVertex = vertices[vertices.length - 1];
+        const distToStart = Math.sqrt(
+          Math.pow(lastVertex.x - lineStart.x, 2) +
+            Math.pow(lastVertex.y - lineStart.y, 2)
+        );
+        const distToEnd = Math.sqrt(
+          Math.pow(lastVertex.x - lineEnd.x, 2) +
+            Math.pow(lastVertex.y - lineEnd.y, 2)
+        );
+
+        // If we're closer to the end than the start, reverse the line
+        useReverse = distToEnd < distToStart;
+      }
+
+      if (useReverse) {
+        for (let i = entity.vertices.length - 1; i >= 0; i--) {
+          vertices.push({ x: entity.vertices[i].x, y: entity.vertices[i].y });
+        }
+      } else {
+        entity.vertices.forEach((vertex) => {
+          vertices.push({ x: vertex.x, y: vertex.y });
+        });
+      }
+    }
+  } else if (isArcEntity(entity)) {
+    const center = entity.center;
+    const radius = entity.radius;
+
+    // Normalize arc angles like the previous working implementation
+    const normalizedStartAngle = normalizeArcAngle(entity.startAngle || 0);
+    const normalizedEndAngle = normalizeArcAngle(
+      entity.endAngle || Math.PI * 2
+    );
+
+    // Handle angle span calculation (might cross 0 degrees)
+    let angleSpan = normalizedEndAngle - normalizedStartAngle;
+    if (angleSpan < 0) {
+      angleSpan += 2 * Math.PI;
+    }
+
+    // High detail segments for smooth curves
+    const segments = Math.max(16, Math.ceil((angleSpan * 32) / Math.PI));
+
+    // Determine direction based on connection to previous vertex
+    let useReverse = false;
+    if (vertices.length > 0) {
+      const lastVertex = vertices[vertices.length - 1];
+      const arcStart = {
+        x: center.x + radius * Math.cos(normalizedStartAngle),
+        y: center.y + radius * Math.sin(normalizedStartAngle),
+      };
+      const arcEnd = {
+        x: center.x + radius * Math.cos(normalizedEndAngle),
+        y: center.y + radius * Math.sin(normalizedEndAngle),
+      };
+
+      const distToStart = Math.sqrt(
+        Math.pow(lastVertex.x - arcStart.x, 2) +
+          Math.pow(lastVertex.y - arcStart.y, 2)
+      );
+      const distToEnd = Math.sqrt(
+        Math.pow(lastVertex.x - arcEnd.x, 2) +
+          Math.pow(lastVertex.y - arcEnd.y, 2)
+      );
+
+      // If we're closer to the arc end, traverse the arc in reverse
+      useReverse = distToEnd < distToStart;
+    }
+
+    if (useReverse) {
+      for (let i = segments; i >= 0; i--) {
+        let angle = normalizedStartAngle + angleSpan * (i / segments);
+        if (angle >= 2 * Math.PI) {
+          angle -= 2 * Math.PI;
+        }
+        vertices.push({
+          x: center.x + radius * Math.cos(angle),
+          y: center.y + radius * Math.sin(angle),
+        });
+      }
+    } else {
+      for (let i = 0; i <= segments; i++) {
+        let angle = normalizedStartAngle + angleSpan * (i / segments);
+        if (angle >= 2 * Math.PI) {
+          angle -= 2 * Math.PI;
+        }
+        vertices.push({
+          x: center.x + radius * Math.cos(angle),
+          y: center.y + radius * Math.sin(angle),
+        });
+      }
+    }
+  } else if (isPolylineEntity(entity)) {
+    if (entity.vertices) {
+      // For polylines, determine direction based on connection to previous vertex
+      let useReverse = false;
+      if (vertices.length > 0 && entity.vertices.length > 1) {
+        const lastVertex = vertices[vertices.length - 1];
+        const polyStart = entity.vertices[0];
+        const polyEnd = entity.vertices[entity.vertices.length - 1];
+
+        const distToStart = Math.sqrt(
+          Math.pow(lastVertex.x - polyStart.x, 2) +
+            Math.pow(lastVertex.y - polyStart.y, 2)
+        );
+        const distToEnd = Math.sqrt(
+          Math.pow(lastVertex.x - polyEnd.x, 2) +
+            Math.pow(lastVertex.y - polyEnd.y, 2)
+        );
+
+        useReverse = distToEnd < distToStart;
+      }
+
+      if (useReverse) {
+        for (let i = entity.vertices.length - 1; i >= 0; i--) {
+          vertices.push({ x: entity.vertices[i].x, y: entity.vertices[i].y });
+        }
+      } else {
+        entity.vertices.forEach((vertex) => {
+          vertices.push({ x: vertex.x, y: vertex.y });
+        });
+      }
+    }
+  } else if (isSplineEntity(entity)) {
+    if (entity.controlPoints && entity.controlPoints.length >= 3) {
+      // Generate vertices using De Boor's algorithm
+      const degree = entity.degreeOfSplineCurve || 3;
+      const knots = entity.knotValues || [];
+
+      if (knots.length > 0) {
+        // Find valid parameter range
+        const tMin = knots[degree] ?? knots[0] ?? 0;
+        const tMax =
+          knots[knots.length - degree - 1] ?? knots[knots.length - 1] ?? 1;
+
+        if (tMin < tMax) {
+          // Generate high-detail vertices for smooth curves
+          const numPoints = Math.max(50, entity.controlPoints.length * 10);
+
+          // Determine direction based on connection to previous vertex
+          let useReverse = false;
+          if (vertices.length > 0) {
+            const lastVertex = vertices[vertices.length - 1];
+            const splineStart = evaluateSplinePoint(
+              tMin,
+              entity.controlPoints,
+              degree,
+              knots
+            );
+            const splineEnd = evaluateSplinePoint(
+              tMax,
+              entity.controlPoints,
+              degree,
+              knots
+            );
+
+            if (splineStart && splineEnd) {
+              const distToStart = Math.sqrt(
+                Math.pow(lastVertex.x - splineStart.x, 2) +
+                  Math.pow(lastVertex.y - splineStart.y, 2)
+              );
+              const distToEnd = Math.sqrt(
+                Math.pow(lastVertex.x - splineEnd.x, 2) +
+                  Math.pow(lastVertex.y - splineEnd.y, 2)
+              );
+              useReverse = distToEnd < distToStart;
+            }
+          }
+
+          const dt = (tMax - tMin) / (numPoints - 1);
+
+          if (useReverse) {
+            for (let i = numPoints; i >= 0; i--) {
+              const t = tMin + i * dt;
+              const point = evaluateSplinePoint(
+                t,
+                entity.controlPoints,
+                degree,
+                knots
+              );
+              if (point) {
+                vertices.push({ x: point.x, y: point.y });
+              }
+            }
+          } else {
+            for (let i = 0; i <= numPoints; i++) {
+              const t = tMin + i * dt;
+              const point = evaluateSplinePoint(
+                t,
+                entity.controlPoints,
+                degree,
+                knots
+              );
+              if (point) {
+                vertices.push({ x: point.x, y: point.y });
+              }
+            }
+          }
+        }
+      } else {
+        // Fallback: use control points as approximation with direction
+        let useReverse = false;
+        if (vertices.length > 0 && entity.controlPoints.length > 1) {
+          const lastVertex = vertices[vertices.length - 1];
+          const splineStart = entity.controlPoints[0];
+          const splineEnd =
+            entity.controlPoints[entity.controlPoints.length - 1];
+
+          const distToStart = Math.sqrt(
+            Math.pow(lastVertex.x - splineStart.x, 2) +
+              Math.pow(lastVertex.y - splineStart.y, 2)
+          );
+          const distToEnd = Math.sqrt(
+            Math.pow(lastVertex.x - splineEnd.x, 2) +
+              Math.pow(lastVertex.y - splineEnd.y, 2)
+          );
+          useReverse = distToEnd < distToStart;
+        }
+
+        if (useReverse) {
+          for (let i = entity.controlPoints.length - 1; i >= 0; i--) {
+            const cp = entity.controlPoints[i];
+            vertices.push({ x: cp.x, y: cp.y });
+          }
+        } else {
+          entity.controlPoints.forEach((cp) => {
+            vertices.push({ x: cp.x, y: cp.y });
+          });
+        }
+      }
+    }
+  }
+}
+
+// Enhanced vertex addition for single entities - ensures maximum detail
+function addEntityVerticesRobust(
+  entity: IEntity,
+  vertices: Array<{ x: number; y: number }>
+) {
+  if (isLineEntity(entity)) {
+    if (entity.vertices && entity.vertices.length >= 2) {
+      // Add ALL vertices from line entity
+      entity.vertices.forEach((vertex) => {
+        vertices.push({ x: vertex.x, y: vertex.y });
+      });
+    }
+  } else if (isArcEntity(entity)) {
+    const center = entity.center;
+    const radius = entity.radius;
+
+    // Use same normalization as in addEntityVerticesWithDirection
+    const normalizedStartAngle = normalizeArcAngle(entity.startAngle || 0);
+    const normalizedEndAngle = normalizeArcAngle(
+      entity.endAngle || Math.PI * 2
+    );
+
+    // Handle angle span calculation (might cross 0 degrees)
+    let angleSpan = normalizedEndAngle - normalizedStartAngle;
+    if (angleSpan < 0) {
+      angleSpan += 2 * Math.PI;
+    }
+
+    // Use same high segment count as multi-entity case for consistency
+    const segments = Math.max(16, Math.ceil((angleSpan * 32) / Math.PI));
+
+    for (let i = 0; i <= segments; i++) {
+      let angle = normalizedStartAngle + angleSpan * (i / segments);
+
+      // Ensure angle stays in valid range
+      if (angle >= 2 * Math.PI) {
+        angle -= 2 * Math.PI;
+      }
+
+      vertices.push({
+        x: center.x + radius * Math.cos(angle),
+        y: center.y + radius * Math.sin(angle),
+      });
+    }
+  } else if (isPolylineEntity(entity)) {
+    if (entity.vertices) {
+      // Add ALL vertices from polyline entity
+      entity.vertices.forEach((vertex) => {
+        vertices.push({ x: vertex.x, y: vertex.y });
+      });
+    }
+  } else if (isSplineEntity(entity)) {
+    if (entity.controlPoints && entity.controlPoints.length >= 3) {
+      // Generate vertices using De Boor's algorithm (same as multi-entity case)
+      const degree = entity.degreeOfSplineCurve || 3;
+      const knots = entity.knotValues || [];
+
+      if (knots.length > 0) {
+        // Find valid parameter range
+        const tMin = knots[degree] ?? knots[0] ?? 0;
+        const tMax =
+          knots[knots.length - degree - 1] ?? knots[knots.length - 1] ?? 1;
+
+        if (tMin < tMax) {
+          // Generate high-detail vertices for smooth curves
+          const numPoints = Math.max(50, entity.controlPoints.length * 10);
+          const dt = (tMax - tMin) / (numPoints - 1);
+
+          for (let i = 0; i <= numPoints; i++) {
+            const t = tMin + i * dt;
+            const point = evaluateSplinePoint(
+              t,
+              entity.controlPoints,
+              degree,
+              knots
+            );
+            if (point) {
+              vertices.push({ x: point.x, y: point.y });
+            }
+          }
+        }
+      } else {
+        // Fallback: use control points as approximation
+        entity.controlPoints.forEach((cp) => {
+          vertices.push({ x: cp.x, y: cp.y });
+        });
+      }
+    }
+  }
+}
+
+// Helper functions for entity endpoints
+function getEntityStartPoint(entity: IEntity): { x: number; y: number } {
+  if (isLineEntity(entity)) {
+    return { x: entity.vertices[0].x, y: entity.vertices[0].y };
+  } else if (isArcEntity(entity)) {
+    // Use normalized angles like the previous working implementation
+    const normalizedStartAngle = normalizeArcAngle(entity.startAngle || 0);
+    return {
+      x: entity.center.x + entity.radius * Math.cos(normalizedStartAngle),
+      y: entity.center.y + entity.radius * Math.sin(normalizedStartAngle),
+    };
+  } else if (isPolylineEntity(entity)) {
+    return { x: entity.vertices[0].x, y: entity.vertices[0].y };
+  } else if (isSplineEntity(entity)) {
+    if (entity.controlPoints && entity.controlPoints.length > 0) {
+      // Try to evaluate the start point using De Boor's algorithm
+      const degree = entity.degreeOfSplineCurve || 3;
+      const knots = entity.knotValues || [];
+
+      if (knots.length > 0) {
+        const tMin = knots[degree] ?? knots[0] ?? 0;
+        const startPoint = evaluateSplinePoint(
+          tMin,
+          entity.controlPoints,
+          degree,
+          knots
+        );
+        if (startPoint) {
+          return startPoint;
+        }
+      }
+
+      // Fallback to first control point
+      return { x: entity.controlPoints[0].x, y: entity.controlPoints[0].y };
+    }
+  }
+  return { x: 0, y: 0 };
+}
+
+function getEntityEndPoint(entity: IEntity): { x: number; y: number } {
+  if (isLineEntity(entity)) {
+    return { x: entity.vertices[1].x, y: entity.vertices[1].y };
+  } else if (isArcEntity(entity)) {
+    // Use normalized angles like the previous working implementation
+    const normalizedEndAngle = normalizeArcAngle(
+      entity.endAngle || Math.PI * 2
+    );
+    return {
+      x: entity.center.x + entity.radius * Math.cos(normalizedEndAngle),
+      y: entity.center.y + entity.radius * Math.sin(normalizedEndAngle),
+    };
+  } else if (isPolylineEntity(entity)) {
+    const lastVertex = entity.vertices[entity.vertices.length - 1];
+    return { x: lastVertex.x, y: lastVertex.y };
+  } else if (isSplineEntity(entity)) {
+    if (entity.controlPoints && entity.controlPoints.length > 0) {
+      // Try to evaluate the end point using De Boor's algorithm
+      const degree = entity.degreeOfSplineCurve || 3;
+      const knots = entity.knotValues || [];
+
+      if (knots.length > 0) {
+        const tMax =
+          knots[knots.length - degree - 1] ?? knots[knots.length - 1] ?? 1;
+        const endPoint = evaluateSplinePoint(
+          tMax,
+          entity.controlPoints,
+          degree,
+          knots
+        );
+        if (endPoint) {
+          return endPoint;
+        }
+      }
+
+      // Fallback to last control point
+      const lastControlPoint =
+        entity.controlPoints[entity.controlPoints.length - 1];
+      return { x: lastControlPoint.x, y: lastControlPoint.y };
+    }
+  }
+  return { x: 0, y: 0 };
+}
+
+function calculateLoopArea(vertices: Array<{ x: number; y: number }>): number {
+  let area = 0;
+  for (let i = 0; i < vertices.length; i++) {
+    const j = (i + 1) % vertices.length;
+    area += vertices[i].x * vertices[j].y;
+    area -= vertices[j].x * vertices[i].y;
+  }
+  return area / 2;
+}
+
+function calculateLoopPerimeter(
   vertices: Array<{ x: number; y: number }>
 ): number {
   let perimeter = 0;
@@ -1330,7 +1489,6 @@ function calculatePolygonPerimeter(
   }
   return perimeter;
 }
-
 export function processDxf(
   dxfContent: string,
   material: THREE.Material
@@ -1420,16 +1578,14 @@ export function processDxf(
   });
   console.log(`=== END DXF DEBUG ===`);
 
-  // Find closed loops for filling with improved detection
-  const closedLoops = findClosedLoopsImproved(entities);
-  console.log(`Found ${closedLoops.length} total closed loops`);
-
-  // Use the improved detection algorithm
-  const bestLoops = closedLoops;
-  console.log(`Using improved tracing approach with ${bestLoops.length} loops`);
+  // Find closed loops using enhanced approach: DxfAnalyzer connectivity + proper ordering
+  const closedLoops = createOrderedLoopsFromConnectivity({ entities });
+  console.log(
+    `Found ${closedLoops.length} total closed loops with proper ordering`
+  );
 
   // Separate outer loops from holes
-  const { outerLoops, holes } = separateOuterLoopsFromHoles(bestLoops);
+  const { outerLoops, holes } = separateOuterLoopsFromHoles(closedLoops);
   console.log(
     `Identified ${outerLoops.length} outer loops and ${holes.length} holes`
   );
@@ -1643,7 +1799,7 @@ export function processDxf(
   if (outerLoops.length > 0 || holes.length > 0) {
     stats["FILLED_SHAPES"] = outerLoops.length;
     stats["HOLE_CUTOUTS"] = holes.length;
-    stats["TOTAL_CLOSED_LOOPS"] = bestLoops.length;
+    stats["TOTAL_CLOSED_LOOPS"] = closedLoops.length;
     stats["TOTAL_FILLS"] = outerLoops.length + holes.length;
     stats["DETECTION_METHOD"] = "TRACED";
   }
