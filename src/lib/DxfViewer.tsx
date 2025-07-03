@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
+// @ts-expect-error - OrbitControls is not typed
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
 import { processDxf } from "./processDxf";
 import { setupCamera } from "./setupCamera";

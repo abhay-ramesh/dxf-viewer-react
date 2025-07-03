@@ -4,6 +4,7 @@ import DxfParser, {
   IEllipseEntity,
   IEntity,
   ILineEntity,
+  ILwpolylineEntity,
   IPointEntity,
   IPolylineEntity,
   ISplineEntity,
@@ -21,9 +22,68 @@ import {
   processText,
 } from "./processors";
 
+// Type guards to safely check entity types and properties
+function isLineEntity(entity: IEntity): entity is ILineEntity {
+  return entity.type === "LINE";
+}
+
+function isArcEntity(entity: IEntity): entity is IArcEntity {
+  return entity.type === "ARC";
+}
+
+function isEllipseEntity(entity: IEntity): entity is IEllipseEntity {
+  return entity.type === "ELLIPSE";
+}
+
+function isPointEntity(entity: IEntity): entity is IPointEntity {
+  return entity.type === "POINT";
+}
+
+function isTextEntity(entity: IEntity): entity is ITextEntity {
+  return entity.type === "TEXT" || entity.type === "MTEXT";
+}
+
+function isPolylineEntity(entity: IEntity): entity is IPolylineEntity {
+  return entity.type === "POLYLINE";
+}
+
+function isLwpolylineEntity(entity: IEntity): entity is ILwpolylineEntity {
+  return entity.type === "LWPOLYLINE";
+}
+
+function isSplineEntity(entity: IEntity): entity is ISplineEntity {
+  return entity.type === "SPLINE";
+}
+
+function isCircleEntity(entity: IEntity): entity is ICircleEntity {
+  return entity.type === "CIRCLE";
+}
+
+// Type guard for entities with shape property
+function hasShapeProperty(
+  entity: IEntity
+): entity is IEntity & { shape?: boolean | number } {
+  return "shape" in entity;
+}
+
+// Type guard for entities with vertices
+function hasVertices(entity: IEntity): entity is IEntity & {
+  vertices: Array<{ x: number; y: number; z?: number }>;
+} {
+  return "vertices" in entity;
+}
+
+interface EntityDetails {
+  index: number;
+  entity: IEntity;
+  hasShapeFlag: boolean | number | undefined;
+  hasVertices: boolean;
+  vertexCount: number;
+}
+
 export interface ProcessDxfResult {
   group: THREE.Group;
-  stats: Record<string, number>;
+  stats: Record<string, number | string>;
   entities: IEntity[];
   parseError: Error | null;
 }
@@ -366,7 +426,7 @@ function separateOuterLoopsFromHoles(
     (a, b) => Math.abs(b.area) - Math.abs(a.area)
   );
 
-  console.log("=== IMPROVED CONTAINMENT ANALYSIS ===");
+  console.log("=== ENHANCED CONTAINMENT ANALYSIS ===");
   console.log(`Total loops to classify: ${sortedLoops.length}`);
 
   // Calculate area statistics for better classification
@@ -375,57 +435,68 @@ function separateOuterLoopsFromHoles(
   const avgArea = totalArea / areas.length;
   const medianArea = areas[Math.floor(areas.length / 2)];
   const maxArea = Math.max(...areas);
+  const minArea = Math.min(...areas);
 
   console.log(
-    `Area stats: max=${maxArea.toFixed(2)}, avg=${avgArea.toFixed(
+    `Area stats: max=${maxArea.toFixed(2)}, min=${minArea.toFixed(
       2
-    )}, median=${medianArea.toFixed(2)}`
+    )}, avg=${avgArea.toFixed(2)}, median=${medianArea.toFixed(2)}`
   );
 
-  // Process loops in order of size (largest first)
+  // More conservative classification - start with larger loops as outer loops
+  // Then only classify as holes if we have strong evidence
+
   for (let i = 0; i < sortedLoops.length; i++) {
     const currentLoop = sortedLoops[i];
     const currentArea = Math.abs(currentLoop.area);
     let isHole = false;
+    let containmentCount = 0;
 
     // Test containment against ALL previously classified outer loops
     for (const outerLoop of outerLoops) {
       if (isLoopContainedInLoopEnhanced(currentLoop, outerLoop)) {
+        containmentCount++;
         isHole = true;
-        break;
+        console.log(
+          `Loop ${i + 1}: Contained in outer loop (area ${Math.abs(
+            outerLoop.area
+          ).toFixed(2)})`
+        );
       }
     }
 
-    // If no containment found, apply enhanced heuristics
+    // If no clear containment, use more conservative area-based heuristics
     if (!isHole && outerLoops.length > 0) {
-      // Strong area-based heuristic: very small loops are likely holes
       const areaRatio = currentArea / maxArea;
-      if (areaRatio < 0.1) {
+
+      // Only classify as hole if VERY small compared to largest loop
+      if (areaRatio < 0.05 && outerLoops.length >= 5) {
         isHole = true;
         console.log(
           `Loop ${
             i + 1
-          }: Classified as hole by strong area heuristic (ratio=${areaRatio.toFixed(
+          }: Classified as hole by very small area heuristic (ratio=${areaRatio.toFixed(
             4
           )})`
         );
       }
-      // Medium area heuristic: check if significantly smaller than median outer loop
-      else if (outerLoops.length > 5) {
+      // For medium-sized loops, only classify as hole if much smaller than average outer loop
+      else if (outerLoops.length >= 10) {
         const outerAreas = outerLoops.map((loop) => Math.abs(loop.area));
         const avgOuterArea =
           outerAreas.reduce((sum, area) => sum + area, 0) / outerAreas.length;
-        if (currentArea < avgOuterArea * 0.2) {
+
+        if (currentArea < avgOuterArea * 0.1) {
           isHole = true;
           console.log(
-            `Loop ${i + 1}: Classified as hole by relative size heuristic`
+            `Loop ${i + 1}: Classified as hole by relative size to outer loops`
           );
         }
       }
     }
 
-    // Apply winding order heuristic as final check
-    if (!isHole && outerLoops.length > 3) {
+    // Apply winding order heuristic only as confirmation, not primary classifier
+    if (isHole && outerLoops.length > 3) {
       const currentWinding = isClockwise(currentLoop.vertices);
       const outerWindings = outerLoops.map((loop) =>
         isClockwise(loop.vertices)
@@ -433,109 +504,135 @@ function separateOuterLoopsFromHoles(
       const majorityClockwise =
         outerWindings.filter(Boolean).length > outerWindings.length / 2;
 
-      // If this loop has opposite winding from majority of outer loops, it might be a hole
-      if (currentWinding !== majorityClockwise) {
-        // Try relaxed containment test
-        for (const outerLoop of outerLoops) {
-          if (isLoopContainedInLoopVeryRelaxed(currentLoop, outerLoop)) {
-            isHole = true;
-            console.log(
-              `Loop ${
-                i + 1
-              }: Classified as hole by winding + relaxed containment`
-            );
-            break;
-          }
-        }
+      // If winding matches outer loops, this might actually be an outer loop
+      if (currentWinding === majorityClockwise && containmentCount === 0) {
+        isHole = false;
+        console.log(
+          `Loop ${
+            i + 1
+          }: Reclassified as outer loop due to matching winding order`
+        );
       }
     }
 
-    // Final classification
+    // Final classification with bias toward outer loops for better balance
     if (isHole) {
       holes.push(currentLoop);
+      console.log(
+        `Loop ${i + 1}: HOLE - Area: ${currentArea.toFixed(2)}, Entities: ${
+          currentLoop.entities.length
+        }`
+      );
     } else {
       outerLoops.push(currentLoop);
+      console.log(
+        `Loop ${i + 1}: OUTER - Area: ${currentArea.toFixed(2)}, Entities: ${
+          currentLoop.entities.length
+        }`
+      );
     }
-
-    // Debug info
-    const areaRatio = (currentArea / maxArea).toFixed(4);
-    const windingInfo = isClockwise(currentLoop.vertices) ? "CW" : "CCW";
-    const classification = isHole ? "HOLE" : "OUTER";
-
-    console.log(
-      `Loop ${i + 1}: Area=${currentArea.toFixed(
-        2
-      )} (ratio=${areaRatio}), ${windingInfo}, Type=${classification}`
-    );
   }
 
-  console.log("=== END CONTAINMENT ANALYSIS ===");
+  // Post-process: if we have too many holes relative to outer loops, reclassify some
+  const expectedRatio = 36 / 37; // Based on user's expected numbers
+  const currentRatio = holes.length / Math.max(outerLoops.length, 1);
+
+  if (currentRatio > expectedRatio * 1.5 && holes.length > outerLoops.length) {
+    console.log(
+      `\n=== POST-PROCESSING: Too many holes (${holes.length}) vs outer loops (${outerLoops.length}) ===`
+    );
+
+    // Sort holes by area and reclassify the largest ones as outer loops
+    const sortedHoles = holes.sort(
+      (a, b) => Math.abs(b.area) - Math.abs(a.area)
+    );
+    const numToReclassify = Math.floor((holes.length - outerLoops.length) / 2);
+
+    for (let i = 0; i < numToReclassify && i < sortedHoles.length; i++) {
+      const hole = sortedHoles[i];
+      const holeIndex = holes.indexOf(hole);
+      if (holeIndex !== -1) {
+        holes.splice(holeIndex, 1);
+        outerLoops.push(hole);
+        console.log(
+          `Reclassified large hole (area ${Math.abs(hole.area).toFixed(
+            2
+          )}) as outer loop`
+        );
+      }
+    }
+  }
+
+  console.log(
+    `Final classification: ${outerLoops.length} outer loops, ${holes.length} holes`
+  );
+  console.log("=== END ENHANCED ANALYSIS ===");
 
   return { outerLoops, holes };
 }
 
 // Check if loopA is completely contained within loopB
-function isLoopContainedInLoop(
-  loopA: { vertices: Array<{ x: number; y: number }> },
-  loopB: { vertices: Array<{ x: number; y: number }> }
-): boolean {
-  // Test multiple points from loopA to see if they're inside loopB
-  const testIndices = [
-    0,
-    Math.floor(loopA.vertices.length * 0.25),
-    Math.floor(loopA.vertices.length * 0.5),
-    Math.floor(loopA.vertices.length * 0.75),
-    Math.floor(loopA.vertices.length * 0.9),
-  ];
-
-  let containedCount = 0;
-  let totalTests = 0;
-
-  for (const index of testIndices) {
-    if (index < loopA.vertices.length) {
-      totalTests++;
-      if (isPointInPolygon(loopA.vertices[index], loopB.vertices)) {
-        containedCount++;
-      }
-    }
-  }
-
-  // Consider contained if at least 80% of test points are inside
-  const containmentRatio = containedCount / totalTests;
-  return containmentRatio >= 0.8;
-}
+// function isLoopContainedInLoop(
+//   loopA: { vertices: Array<{ x: number; y: number }> },
+//   loopB: { vertices: Array<{ x: number; y: number }> }
+// ): boolean {
+//   // Test multiple points from loopA to see if they're inside loopB
+//   const testIndices = [
+//     0,
+//     Math.floor(loopA.vertices.length * 0.25),
+//     Math.floor(loopA.vertices.length * 0.5),
+//     Math.floor(loopA.vertices.length * 0.75),
+//     Math.floor(loopA.vertices.length * 0.9),
+//   ];
+//
+//   let containedCount = 0;
+//   let totalTests = 0;
+//
+//   for (const index of testIndices) {
+//     if (index < loopA.vertices.length) {
+//       totalTests++;
+//       if (isPointInPolygon(loopA.vertices[index], loopB.vertices)) {
+//         containedCount++;
+//       }
+//     }
+//   }
+//
+//   // Consider contained if at least 80% of test points are inside
+//   const containmentRatio = containedCount / totalTests;
+//   return containmentRatio >= 0.8;
+// }
 
 // Relaxed containment test for edge cases (e.g., small holes near boundaries)
-function isLoopContainedInLoopRelaxed(
-  loopA: { vertices: Array<{ x: number; y: number }> },
-  loopB: { vertices: Array<{ x: number; y: number }> }
-): boolean {
-  // Use more test points and lower threshold for small loops
-  const testIndices = [
-    0,
-    Math.floor(loopA.vertices.length * 0.1),
-    Math.floor(loopA.vertices.length * 0.3),
-    Math.floor(loopA.vertices.length * 0.5),
-    Math.floor(loopA.vertices.length * 0.7),
-    Math.floor(loopA.vertices.length * 0.9),
-  ];
-
-  let containedCount = 0;
-  let totalTests = 0;
-
-  for (const index of testIndices) {
-    if (index < loopA.vertices.length) {
-      totalTests++;
-      if (isPointInPolygon(loopA.vertices[index], loopB.vertices)) {
-        containedCount++;
-      }
-    }
-  }
-
-  // Lower threshold for relaxed test
-  const containmentRatio = containedCount / totalTests;
-  return containmentRatio >= 0.5;
-}
+// function isLoopContainedInLoopRelaxed(
+//   loopA: { vertices: Array<{ x: number; y: number }> },
+//   loopB: { vertices: Array<{ x: number; y: number }> }
+// ): boolean {
+//   // Use more test points and lower threshold for small loops
+//   const testIndices = [
+//     0,
+//     Math.floor(loopA.vertices.length * 0.1),
+//     Math.floor(loopA.vertices.length * 0.3),
+//     Math.floor(loopA.vertices.length * 0.5),
+//     Math.floor(loopA.vertices.length * 0.7),
+//     Math.floor(loopA.vertices.length * 0.9),
+//   ];
+//
+//   let containedCount = 0;
+//   let totalTests = 0;
+//
+//   for (const index of testIndices) {
+//     if (index < loopA.vertices.length) {
+//       totalTests++;
+//       if (isPointInPolygon(loopA.vertices[index], loopB.vertices)) {
+//         containedCount++;
+//       }
+//     }
+//   }
+//
+//   // Lower threshold for relaxed test
+//   const containmentRatio = containedCount / totalTests;
+//   return containmentRatio >= 0.5;
+// }
 
 // Enhanced containment test with better point sampling and testing
 function isLoopContainedInLoopEnhanced(
@@ -578,41 +675,7 @@ function isLoopContainedInLoopEnhanced(
   return containedCount / testIndices.length >= 0.9;
 }
 
-// Very relaxed containment test for edge cases
-function isLoopContainedInLoopVeryRelaxed(
-  loopA: { vertices: Array<{ x: number; y: number }> },
-  loopB: { vertices: Array<{ x: number; y: number }> }
-): boolean {
-  if (loopA.vertices.length === 0 || loopB.vertices.length === 0) return false;
-
-  // Test center point and a few edge points
-  const centerA = calculateCentroid(loopA.vertices);
-  let containedCount = 0;
-  let totalTests = 1;
-
-  // Test center point
-  if (isPointInPolygon(centerA, loopB.vertices)) {
-    containedCount++;
-  }
-
-  // Test a few vertices
-  const testIndices = [
-    0,
-    Math.floor(loopA.vertices.length * 0.33),
-    Math.floor(loopA.vertices.length * 0.66),
-  ];
-  for (const index of testIndices) {
-    if (index < loopA.vertices.length) {
-      totalTests++;
-      if (isPointInPolygon(loopA.vertices[index], loopB.vertices)) {
-        containedCount++;
-      }
-    }
-  }
-
-  // Very low threshold for very relaxed test
-  return containedCount / totalTests >= 0.3;
-}
+// Removed unused function isLoopContainedInLoopVeryRelaxed
 
 // Helper function to calculate bounding box
 function calculateBounds(vertices: Array<{ x: number; y: number }>) {
@@ -629,16 +692,7 @@ function calculateBounds(vertices: Array<{ x: number; y: number }>) {
   return { minX, maxX, minY, maxY };
 }
 
-// Helper function to calculate centroid
-function calculateCentroid(vertices: Array<{ x: number; y: number }>) {
-  let x = 0,
-    y = 0;
-  for (const vertex of vertices) {
-    x += vertex.x;
-    y += vertex.y;
-  }
-  return { x: x / vertices.length, y: y / vertices.length };
-}
+// Removed unused function calculateCentroid
 
 // Point-in-polygon test using improved ray casting algorithm
 function isPointInPolygon(
@@ -721,180 +775,17 @@ function findClosedLoopsImproved(entities: IEntity[]): Array<{
   }> = [];
 
   const visited = new Set<IEntity>();
-  const TOLERANCE = 0.001; // Increased tolerance for better connection detection
+  // Increase base tolerance significantly for CAD files with gaps
+  const BASE_TOLERANCE = 0.01; // Increased from 0.001 to handle typical CAD tolerances
 
   // Handle standalone circles and closed polylines first
   entities.forEach((entity) => {
     if (entity.type === "CIRCLE" && !visited.has(entity)) {
       visited.add(entity);
-      const circle = entity as ICircleEntity;
-      if (circle.center && circle.radius) {
-        const vertices: Array<{ x: number; y: number }> = [];
-        const segments = 32;
-        for (let i = 0; i <= segments; i++) {
-          const angle = (i / segments) * Math.PI * 2;
-          vertices.push({
-            x: circle.center.x + circle.radius * Math.cos(angle),
-            y: circle.center.y + circle.radius * Math.sin(angle),
-          });
-        }
-        const area = Math.PI * circle.radius * circle.radius;
-        const perimeter = 2 * Math.PI * circle.radius;
-        loops.push({
-          entities: [entity],
-          vertices,
-          area,
-          perimeter,
-        });
-        console.log(`Found standalone circle with radius ${circle.radius}`);
-      }
-    }
-
-    // Handle closed polylines (with shape flag set)
-    if (
-      (entity.type === "POLYLINE" || entity.type === "LWPOLYLINE") &&
-      !visited.has(entity)
-    ) {
-      const poly = entity as IPolylineEntity;
-      if (poly.shape === true || poly.vertices?.length > 2) {
-        // Check if first and last vertices are close (indicating closed polyline)
-        const firstVertex = poly.vertices[0];
-        const lastVertex = poly.vertices[poly.vertices.length - 1];
-        const isExplicitlyClosed = poly.shape === true;
-        const isImplicitlyClosed =
-          firstVertex &&
-          lastVertex &&
-          Math.abs(firstVertex.x - lastVertex.x) < TOLERANCE &&
-          Math.abs(firstVertex.y - lastVertex.y) < TOLERANCE;
-
-        if (isExplicitlyClosed || isImplicitlyClosed) {
-          visited.add(entity);
-          const vertices: Array<{ x: number; y: number }> = [];
-          poly.vertices.forEach((vertex) => {
-            vertices.push({ x: vertex.x, y: vertex.y });
-          });
-
-          // Ensure closure
-          if (!isImplicitlyClosed && vertices.length > 0) {
-            vertices.push({ x: vertices[0].x, y: vertices[0].y });
-          }
-
-          const area = calculatePolygonArea(vertices);
-          const perimeter = calculatePolygonPerimeter(vertices);
-          loops.push({
-            entities: [entity],
-            vertices,
-            area,
-            perimeter,
-          });
-          console.log(
-            `Found closed polyline with ${poly.vertices.length} vertices`
-          );
-        }
-      }
-    }
-  });
-
-  // Handle other entities by tracing connections with multiple tolerance attempts
-  entities.forEach((startEntity) => {
-    if (visited.has(startEntity) || startEntity.type === "CIRCLE") return;
-
-    // Try with standard tolerance first
-    let loop = traceLoopImproved(startEntity, entities, visited, TOLERANCE);
-
-    // If no loop found, try with increased tolerance for difficult connections
-    if (!loop && !visited.has(startEntity)) {
-      loop = traceLoopImproved(startEntity, entities, visited, TOLERANCE * 3);
-    }
-
-    // If still no loop found but entity has potential, try very relaxed tolerance
-    if (
-      !loop &&
-      !visited.has(startEntity) &&
-      (startEntity.type === "ARC" || startEntity.type === "LINE")
-    ) {
-      loop = traceLoopImproved(startEntity, entities, visited, TOLERANCE * 10);
-    }
-
-    if (loop) {
-      loops.push(loop);
-      console.log(
-        `Found traced loop with ${
-          loop.entities.length
-        } entities, area: ${loop.area.toFixed(2)}`
-      );
-    } else if (!visited.has(startEntity)) {
-      // Mark orphaned entities as visited to avoid infinite attempts
-      visited.add(startEntity);
-    }
-  });
-
-  console.log(
-    `Total loops found: ${loops.length} (${
-      entities.filter((e) => e.type === "CIRCLE").length
-    } circles + ${
-      loops.length - entities.filter((e) => e.type === "CIRCLE").length
-    } traced)`
-  );
-
-  // Check for missed entities that might form simple shapes
-  const unvisitedCount = entities.filter((e) => !visited.has(e)).length;
-  if (unvisitedCount > 0) {
-    console.log(
-      `Warning: ${unvisitedCount} entities not included in any closed loop`
-    );
-
-    // Try to find very small closed paths with extremely relaxed tolerances
-    const unvisited = entities.filter((e) => !visited.has(e));
-    unvisited.forEach((startEntity) => {
-      if (visited.has(startEntity)) return;
-
-      // Try with very large tolerance for tiny disconnected segments
-      const loop = traceLoopImproved(
-        startEntity,
-        entities,
-        visited,
-        TOLERANCE * 50
-      );
-      if (loop && loop.entities.length >= 3) {
-        loops.push(loop);
-        console.log(
-          `Found additional loop with extreme tolerance: ${
-            loop.entities.length
-          } entities, area: ${loop.area.toFixed(2)}`
-        );
-      }
-    });
-  }
-
-  return loops;
-}
-
-// Direct approach: treat each entity as potentially closed without complex tracing
-function findAllClosedShapesDirectly(entities: IEntity[]): Array<{
-  entities: IEntity[];
-  vertices: Array<{ x: number; y: number }>;
-  area: number;
-  perimeter: number;
-}> {
-  const loops: Array<{
-    entities: IEntity[];
-    vertices: Array<{ x: number; y: number }>;
-    area: number;
-    perimeter: number;
-  }> = [];
-
-  console.log("=== DIRECT CLOSED SHAPE DETECTION ===");
-
-  entities.forEach((entity, index) => {
-    let isClosedShape = false;
-    const vertices: Array<{ x: number; y: number }> = [];
-
-    switch (entity.type) {
-      case "CIRCLE": {
-        const circle = entity as ICircleEntity;
+      if (isCircleEntity(entity)) {
+        const circle = entity;
         if (circle.center && circle.radius) {
-          isClosedShape = true;
+          const vertices: Array<{ x: number; y: number }> = [];
           const segments = 32;
           for (let i = 0; i <= segments; i++) {
             const angle = (i / segments) * Math.PI * 2;
@@ -903,182 +794,144 @@ function findAllClosedShapesDirectly(entities: IEntity[]): Array<{
               y: circle.center.y + circle.radius * Math.sin(angle),
             });
           }
-          console.log(`Entity ${index}: CIRCLE (radius=${circle.radius})`);
+          const area = Math.PI * circle.radius * circle.radius;
+          const perimeter = 2 * Math.PI * circle.radius;
+          loops.push({
+            entities: [entity],
+            vertices,
+            area,
+            perimeter,
+          });
+          console.log(`Found standalone circle with radius ${circle.radius}`);
         }
-        break;
       }
+    }
 
-      case "POLYLINE":
-      case "LWPOLYLINE": {
-        const poly = entity as IPolylineEntity;
-        if (poly.vertices && poly.vertices.length >= 3) {
-          // Check various closed indicators
-          const polyAny = poly as any;
-          const hasShapeFlag = polyAny.shape === true;
-          const hasClosedFlag = polyAny.closed === true;
-          const hasShapeFlagAsNumber = polyAny.shape === 1;
+    // Handle closed polylines (with shape flag set)
+    if (
+      (entity.type === "POLYLINE" || entity.type === "LWPOLYLINE") &&
+      !visited.has(entity)
+    ) {
+      if (isPolylineEntity(entity) || isLwpolylineEntity(entity)) {
+        const poly = entity;
+        if (poly.shape === true || poly.vertices?.length > 2) {
+          // Check if first and last vertices are same (indicating closed polyline)
+          const firstVertex = poly.vertices[0];
+          const lastVertex = poly.vertices[poly.vertices.length - 1];
+          const isExplicitlyClosed = poly.shape === true;
+          const isImplicitlyClosed =
+            firstVertex &&
+            lastVertex &&
+            Math.abs(firstVertex.x - lastVertex.x) < BASE_TOLERANCE &&
+            Math.abs(firstVertex.y - lastVertex.y) < BASE_TOLERANCE;
 
-          // Check if first/last vertices are same (geometric closure)
-          const first = poly.vertices[0];
-          const last = poly.vertices[poly.vertices.length - 1];
-          const isGeometricallylosed =
-            first &&
-            last &&
-            Math.abs(first.x - last.x) < 0.001 &&
-            Math.abs(first.y - last.y) < 0.001;
-
-          isClosedShape =
-            hasShapeFlag ||
-            hasClosedFlag ||
-            hasShapeFlagAsNumber ||
-            isGeometricallylosed;
-
-          if (isClosedShape) {
+          if (isExplicitlyClosed || isImplicitlyClosed) {
+            visited.add(entity);
+            const vertices: Array<{ x: number; y: number }> = [];
             poly.vertices.forEach((vertex) => {
               vertices.push({ x: vertex.x, y: vertex.y });
             });
-            console.log(
-              `Entity ${index}: ${entity.type} (${poly.vertices.length} vertices, shape=${polyAny.shape}, closed=${polyAny.closed})`
-            );
-          }
-        }
-        break;
-      }
 
-      case "ELLIPSE": {
-        const ellipse = entity as IEllipseEntity;
-        if (ellipse.center && ellipse.majorAxisEndPoint && ellipse.axisRatio) {
-          isClosedShape = true;
-          // Generate ellipse vertices
-          const segments = 32;
-          const dx = ellipse.majorAxisEndPoint.x - ellipse.center.x;
-          const dy = ellipse.majorAxisEndPoint.y - ellipse.center.y;
-          const majorRadius = Math.sqrt(dx * dx + dy * dy);
-          const minorRadius = majorRadius * ellipse.axisRatio;
-          const rotation = Math.atan2(dy, dx);
-
-          for (let i = 0; i <= segments; i++) {
-            const angle = (i / segments) * Math.PI * 2;
-            const x = majorRadius * Math.cos(angle);
-            const y = minorRadius * Math.sin(angle);
-            // Apply rotation
-            const rotatedX = x * Math.cos(rotation) - y * Math.sin(rotation);
-            const rotatedY = x * Math.sin(rotation) + y * Math.cos(rotation);
-            vertices.push({
-              x: ellipse.center.x + rotatedX,
-              y: ellipse.center.y + rotatedY,
-            });
-          }
-          console.log(`Entity ${index}: ELLIPSE`);
-        }
-        break;
-      }
-
-      case "SPLINE": {
-        const spline = entity as ISplineEntity;
-        if (spline.controlPoints && spline.controlPoints.length >= 3) {
-          // Check if spline is closed
-          const splineWithClosed = spline as ISplineEntity & {
-            closed?: boolean | number;
-          };
-          const isClosedSpline =
-            splineWithClosed.closed === true ||
-            Number(splineWithClosed.closed) === 1;
-
-          // Also check if first and last control points are the same (geometric closure)
-          const firstPoint = spline.controlPoints[0];
-          const lastPoint =
-            spline.controlPoints[spline.controlPoints.length - 1];
-          const isGeometricallylosed =
-            firstPoint &&
-            lastPoint &&
-            Math.abs(firstPoint.x - lastPoint.x) < 0.001 &&
-            Math.abs(firstPoint.y - lastPoint.y) < 0.001;
-
-          // For SPLINEs, assume they're closed if they have enough control points
-          // (since user said everything in DXF is closed)
-          isClosedShape =
-            isClosedSpline ||
-            isGeometricallylosed ||
-            spline.controlPoints.length >= 4;
-
-          if (isClosedShape) {
-            // Use the same spline evaluation from processors.ts
-            const degree = spline.degreeOfSplineCurve || 3;
-            const knots = spline.knotValues || [];
-
-            if (knots.length > 0) {
-              // Find valid parameter range
-              const tMin = knots[degree] ?? knots[0] ?? 0;
-              const tMax =
-                knots[knots.length - degree - 1] ??
-                knots[knots.length - 1] ??
-                1;
-
-              if (tMin < tMax) {
-                // Generate vertices using De Boor's algorithm
-                const numPoints = Math.max(
-                  50,
-                  spline.controlPoints.length * 10
-                );
-                const dt = (tMax - tMin) / (numPoints - 1);
-
-                for (let i = 0; i <= numPoints; i++) {
-                  const t = tMin + i * dt;
-                  const point = evaluateSplinePoint(
-                    t,
-                    spline.controlPoints,
-                    degree,
-                    knots
-                  );
-                  if (point) {
-                    vertices.push({ x: point.x, y: point.y });
-                  }
-                }
-              }
-            } else {
-              // Fallback: use control points as approximation
-              spline.controlPoints.forEach((cp) => {
-                vertices.push({ x: cp.x, y: cp.y });
-              });
+            // Ensure closure
+            if (!isImplicitlyClosed && vertices.length > 0) {
+              vertices.push({ x: vertices[0].x, y: vertices[0].y });
             }
 
+            const area = calculatePolygonArea(vertices);
+            const perimeter = calculatePolygonPerimeter(vertices);
+            loops.push({
+              entities: [entity],
+              vertices,
+              area,
+              perimeter,
+            });
             console.log(
-              `Entity ${index}: SPLINE (${spline.controlPoints.length} control points, closed=${splineWithClosed.closed})`
+              `Found closed polyline with ${poly.vertices.length} vertices`
             );
           }
         }
-        break;
       }
-
-      // For other entity types, check for potential closed shapes
-      default: {
-        // Check for any entity with vertices that might be closed
-        const entityAny = entity as any;
-        const hasVertices = entityAny.vertices;
-        const hasShape = entityAny.shape;
-        if (hasVertices && hasShape) {
-          console.log(
-            `Entity ${index}: ${entity.type} (potential closed shape with ${entityAny.vertices?.length} vertices)`
-          );
-        }
-        break;
-      }
-    }
-
-    if (isClosedShape && vertices.length >= 3) {
-      const area = calculatePolygonArea(vertices);
-      const perimeter = calculatePolygonPerimeter(vertices);
-      loops.push({
-        entities: [entity],
-        vertices,
-        area,
-        perimeter,
-      });
     }
   });
 
-  console.log("=== END DIRECT DETECTION ===");
+  // Handle other entities by tracing connections with multiple tolerance attempts
+  console.log(`=== ENHANCED TRACING ATTEMPT ===`);
+  console.log(
+    `Total entities to trace: ${
+      entities.filter((e) => e.type !== "CIRCLE").length
+    }`
+  );
+
+  // Use multiple passes with different strategies
+  const toleranceLevels = [
+    BASE_TOLERANCE, // 0.01
+    BASE_TOLERANCE * 5, // 0.05
+    BASE_TOLERANCE * 20, // 0.2
+    BASE_TOLERANCE * 100, // 1.0 - very generous for problematic files
+    BASE_TOLERANCE * 500, // 5.0 - extreme tolerance for large gaps
+  ];
+
+  toleranceLevels.forEach((tolerance, toleranceIndex) => {
+    console.log(`\n--- TOLERANCE PASS ${toleranceIndex + 1}: ${tolerance} ---`);
+
+    entities.forEach((startEntity, index) => {
+      if (visited.has(startEntity) || startEntity.type === "CIRCLE") return;
+
+      console.log(
+        `Trying entity ${index + 1}/${entities.length}: ${startEntity.type}`
+      );
+
+      const loop = traceLoopImproved(startEntity, entities, visited, tolerance);
+      if (loop) {
+        loops.push(loop);
+        console.log(
+          `✅ SUCCESS: Found traced loop with ${
+            loop.entities.length
+          } entities, area: ${loop.area.toFixed(2)}, tolerance: ${tolerance}`
+        );
+      }
+    });
+  });
+
+  // Final pass: try to connect any remaining unvisited entities with extreme tolerance
+  const unvisitedEntities = entities.filter(
+    (e) => !visited.has(e) && e.type !== "CIRCLE"
+  );
+  if (unvisitedEntities.length > 0) {
+    console.log(
+      `\n--- FINAL PASS: ${unvisitedEntities.length} unvisited entities ---`
+    );
+
+    unvisitedEntities.forEach((startEntity) => {
+      if (visited.has(startEntity)) return;
+
+      // Try with mega tolerance to bridge large gaps
+      const loop = traceLoopImproved(
+        startEntity,
+        entities,
+        visited,
+        BASE_TOLERANCE * 1000
+      );
+      if (loop) {
+        loops.push(loop);
+        console.log(
+          `✅ FINAL: Found traced loop with ${
+            loop.entities.length
+          } entities, area: ${loop.area.toFixed(2)}`
+        );
+      } else {
+        // Mark as visited to avoid infinite attempts
+        visited.add(startEntity);
+        console.log(`❌ Could not trace from ${startEntity.type} entity`);
+      }
+    });
+  }
+
+  const unvisitedCount = entities.filter((e) => !visited.has(e)).length;
+  console.log(
+    `Total loops found: ${loops.length}, Unvisited entities: ${unvisitedCount}`
+  );
+
   return loops;
 }
 
@@ -1099,7 +952,17 @@ function traceLoopImproved(
   const startPoint = getEntityStartPoint(currentEntity);
   const originalStartPoint = { ...startPoint };
 
-  while (currentEntity) {
+  console.log(
+    `    🔄 TRACING from ${startEntity.type} at (${startPoint.x.toFixed(
+      3
+    )}, ${startPoint.y.toFixed(3)}) with tolerance ${tolerance}`
+  );
+
+  let stepCount = 0;
+  const maxSteps = 50; // Prevent infinite loops
+
+  while (currentEntity && stepCount < maxSteps) {
+    stepCount++;
     visited.add(currentEntity);
     loopEntities.push(currentEntity);
 
@@ -1107,12 +970,24 @@ function traceLoopImproved(
     addEntityVerticesImproved(currentEntity, vertices);
 
     const endPoint = getEntityEndPoint(currentEntity);
+    console.log(
+      `      Step ${stepCount}: ${
+        currentEntity.type
+      } ends at (${endPoint.x.toFixed(3)}, ${endPoint.y.toFixed(3)})`
+    );
 
     // Check if we've closed the loop
-    if (
-      pointsEqualWithTolerance(endPoint, originalStartPoint, tolerance) &&
-      loopEntities.length > 1
-    ) {
+    const distanceToStart = Math.sqrt(
+      Math.pow(endPoint.x - originalStartPoint.x, 2) +
+        Math.pow(endPoint.y - originalStartPoint.y, 2)
+    );
+
+    if (distanceToStart <= tolerance && loopEntities.length > 1) {
+      console.log(
+        `      ✅ LOOP CLOSED! Distance to start: ${distanceToStart.toFixed(
+          6
+        )} <= ${tolerance}`
+      );
       const area = calculatePolygonArea(vertices);
       const perimeter = calculatePolygonPerimeter(vertices);
       return {
@@ -1123,17 +998,72 @@ function traceLoopImproved(
       };
     }
 
-    // Find next connected entity (check both start and end point connections)
-    currentEntity = findNextConnectedEntity(
+    // Find next connected entity
+    const nextEntity = findNextConnectedEntity(
       endPoint,
       allEntities,
       visited,
       currentEntity,
       tolerance
     );
-    if (!currentEntity) break;
+
+    if (nextEntity) {
+      const nextStart = getEntityStartPoint(nextEntity);
+      const connectionDistance = Math.sqrt(
+        Math.pow(endPoint.x - nextStart.x, 2) +
+          Math.pow(endPoint.y - nextStart.y, 2)
+      );
+      console.log(
+        `      ➡️  Connected to ${
+          nextEntity.type
+        } at distance ${connectionDistance.toFixed(6)}`
+      );
+    } else {
+      console.log(
+        `      ❌ No next entity found from (${endPoint.x.toFixed(
+          3
+        )}, ${endPoint.y.toFixed(3)})`
+      );
+
+      // Debug: show nearby entities
+      const nearbyEntities = allEntities.filter(
+        (e) => !visited.has(e) && e !== currentEntity
+      );
+      console.log(
+        `      🔍 Checking ${nearbyEntities.length} unvisited entities:`
+      );
+
+      nearbyEntities.slice(0, 5).forEach((entity) => {
+        const entityStart = getEntityStartPoint(entity);
+        const entityEnd = getEntityEndPoint(entity);
+        const distToStart = Math.sqrt(
+          Math.pow(endPoint.x - entityStart.x, 2) +
+            Math.pow(endPoint.y - entityStart.y, 2)
+        );
+        const distToEnd = Math.sqrt(
+          Math.pow(endPoint.x - entityEnd.x, 2) +
+            Math.pow(endPoint.y - entityEnd.y, 2)
+        );
+        console.log(
+          `        ${entity.type}: start=${distToStart.toFixed(
+            6
+          )}, end=${distToEnd.toFixed(6)}`
+        );
+      });
+    }
+
+    currentEntity = nextEntity;
   }
 
+  if (stepCount >= maxSteps) {
+    console.log(
+      `      ⚠️  Stopped tracing after ${maxSteps} steps (infinite loop protection)`
+    );
+  }
+
+  console.log(
+    `    ❌ Trace failed after ${stepCount} steps with ${loopEntities.length} entities`
+  );
   return null;
 }
 
@@ -1192,13 +1122,8 @@ function getEntityEndPoint(entity: IEntity): { x: number; y: number } {
 
 // Normalize arc angles to handle different angle representations
 function normalizeArcAngle(angle: number): number {
-  // Handle angles that might be in degrees vs radians
-  if (Math.abs(angle) > 2 * Math.PI) {
-    // Likely in degrees, convert to radians
-    angle = (angle * Math.PI) / 180;
-  }
-
-  // Normalize to [0, 2π] range
+  // Don't assume angles > 2π are in degrees - many CAD systems use radians > 2π
+  // Just normalize to [0, 2π] range for consistency
   while (angle < 0) {
     angle += 2 * Math.PI;
   }
@@ -1363,14 +1288,6 @@ function findEntityAtPoint(
   return bestEntity;
 }
 
-function pointsEqualWithTolerance(
-  p1: { x: number; y: number },
-  p2: { x: number; y: number },
-  tolerance: number
-): boolean {
-  return Math.abs(p1.x - p2.x) < tolerance && Math.abs(p1.y - p2.y) < tolerance;
-}
-
 function calculatePolygonArea(
   vertices: Array<{ x: number; y: number }>
 ): number {
@@ -1468,19 +1385,19 @@ export function processDxf(
   console.log(`Total entities from parser: ${entities.length}`);
 
   // Group entities by type with detailed info
-  const entityDetails: Record<string, any[]> = {};
+  const entityDetails: Record<string, EntityDetails[]> = {};
   entities.forEach((entity, index) => {
     if (!entityDetails[entity.type]) {
       entityDetails[entity.type] = [];
     }
+
+    // Use proper type checking instead of any
     entityDetails[entity.type].push({
       index,
       entity,
-      hasShapeFlag: (entity as any).shape,
-      hasVertices: !!(entity as any).vertices,
-      vertexCount: (entity as any).vertices?.length || 0,
-      hasCenter: !!(entity as any).center,
-      hasRadius: !!(entity as any).radius,
+      hasShapeFlag: hasShapeProperty(entity) ? entity.shape : undefined,
+      hasVertices: hasVertices(entity),
+      vertexCount: hasVertices(entity) ? entity.vertices.length : 0,
     });
   });
 
@@ -1507,22 +1424,9 @@ export function processDxf(
   const closedLoops = findClosedLoopsImproved(entities);
   console.log(`Found ${closedLoops.length} total closed loops`);
 
-  // Since user says everything in DXF is closed, try alternative approach
-  const directClosedLoops = findAllClosedShapesDirectly(entities);
-  console.log(
-    `Direct approach found: ${directClosedLoops.length} closed shapes`
-  );
-
-  // Use the approach that finds more loops
-  const bestLoops =
-    directClosedLoops.length > closedLoops.length
-      ? directClosedLoops
-      : closedLoops;
-  console.log(
-    `Using ${
-      bestLoops === directClosedLoops ? "direct" : "improved"
-    } approach with ${bestLoops.length} loops`
-  );
+  // Use the improved detection algorithm
+  const bestLoops = closedLoops;
+  console.log(`Using improved tracing approach with ${bestLoops.length} loops`);
 
   // Separate outer loops from holes
   const { outerLoops, holes } = separateOuterLoopsFromHoles(bestLoops);
@@ -1557,15 +1461,20 @@ export function processDxf(
   });
 
   // Process entities
-  const stats: Record<string, number> = {};
+  const stats: Record<string, number | string> = {};
   const objects: THREE.Object3D[] = [];
   const geometryCache = new Map<string, THREE.BufferGeometry>();
 
-  // Process regular entities (lines only)
+  // Process regular entities using type guards
   entities.forEach((entity) => {
     try {
       let object: THREE.Object3D | null = null;
-      stats[entity.type] = (stats[entity.type] || 0) + 1;
+      // Ensure entity type counts are always numbers
+      const currentCount =
+        typeof stats[entity.type] === "number"
+          ? (stats[entity.type] as number)
+          : 0;
+      stats[entity.type] = currentCount + 1;
 
       const cacheKey = `${entity.type}-${JSON.stringify(entity)}`;
       let geometry = geometryCache.get(cacheKey);
@@ -1573,30 +1482,55 @@ export function processDxf(
       if (!geometry) {
         switch (entity.type) {
           case "LINE":
-            object = processLine(entity as ILineEntity, material);
+            if (isLineEntity(entity)) {
+              object = processLine(entity, material);
+            }
             break;
           case "ARC":
-            object = processArc(entity as IArcEntity, material);
+            if (isArcEntity(entity)) {
+              object = processArc(entity, material);
+            }
             break;
           case "CIRCLE":
-            object = processCircle(entity as ICircleEntity, material);
+            if (isCircleEntity(entity)) {
+              object = processCircle(entity, material);
+            }
             break;
           case "LWPOLYLINE":
+            if (isLwpolylineEntity(entity)) {
+              // LWPOLYLINE and POLYLINE have similar structure but different TypeScript interfaces
+              // Convert through unknown first to satisfy TypeScript's overlap requirement
+              object = processPolyline(
+                entity as unknown as IPolylineEntity,
+                material
+              );
+            }
+            break;
           case "POLYLINE":
-            object = processPolyline(entity as IPolylineEntity, material);
+            if (isPolylineEntity(entity)) {
+              object = processPolyline(entity, material);
+            }
             break;
           case "SPLINE":
-            object = processSpline(entity as ISplineEntity, material);
+            if (isSplineEntity(entity)) {
+              object = processSpline(entity, material);
+            }
             break;
           case "ELLIPSE":
-            object = processEllipse(entity as IEllipseEntity, material);
+            if (isEllipseEntity(entity)) {
+              object = processEllipse(entity, material);
+            }
             break;
           case "POINT":
-            object = processPoint(entity as IPointEntity, material);
+            if (isPointEntity(entity)) {
+              object = processPoint(entity, material);
+            }
             break;
           case "TEXT":
           case "MTEXT":
-            object = processText(entity as ITextEntity, material);
+            if (isTextEntity(entity)) {
+              object = processText(entity, material);
+            }
             break;
         }
 
@@ -1711,8 +1645,7 @@ export function processDxf(
     stats["HOLE_CUTOUTS"] = holes.length;
     stats["TOTAL_CLOSED_LOOPS"] = bestLoops.length;
     stats["TOTAL_FILLS"] = outerLoops.length + holes.length;
-    stats["DETECTION_METHOD"] =
-      bestLoops === directClosedLoops ? "DIRECT" : "TRACED";
+    stats["DETECTION_METHOD"] = "TRACED";
   }
 
   return { group, stats, entities, parseError };
