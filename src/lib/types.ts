@@ -1,14 +1,14 @@
 import { IEntity } from "dxf-parser";
-import { Color } from "three";
+import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
 export interface DxfViewerProps {
   /** The DXF file content as a string */
   dxfContent: string | null;
   /** Background color of the viewer (default: #f0f0f0) */
-  backgroundColor?: string | number | Color;
+  backgroundColor?: string | number | THREE.Color;
   /** Color of the DXF entities (default: #0000ff) */
-  entityColor?: string | number | Color;
+  entityColor?: string | number | THREE.Color;
   /** Width of the viewer (default: 100%) */
   width?: string | number;
   /** Height of the viewer (default: 100%) */
@@ -43,7 +43,7 @@ export interface EntityStats {
 }
 
 export interface ToolContext {
-  camera: THREE.PerspectiveCamera;
+  camera: THREE.OrthographicCamera;
   renderer: THREE.WebGLRenderer;
   scene: THREE.Scene;
   group: THREE.Group;

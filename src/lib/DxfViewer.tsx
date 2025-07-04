@@ -62,7 +62,7 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
-  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const cameraRef = useRef<THREE.OrthographicCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const animationFrameRef = useRef<number>();
   const [error, setError] = useState<string | null>(null);
@@ -90,6 +90,33 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
         width: containerRef.current.clientWidth,
         height: containerRef.current.clientHeight,
       });
+    }
+  }, [containerDimensions]);
+
+  // Update container dimensions on resize for orthographic camera
+  useLayoutEffect(() => {
+    if (!containerRef.current || !containerDimensions) return;
+
+    const handleContainerResize = () => {
+      if (containerRef.current) {
+        const newWidth = containerRef.current.clientWidth;
+        const newHeight = containerRef.current.clientHeight;
+
+        if (
+          newWidth !== containerDimensions.width ||
+          newHeight !== containerDimensions.height
+        ) {
+          setContainerDimensions({ width: newWidth, height: newHeight });
+        }
+      }
+    };
+
+    // Use ResizeObserver for better performance if available
+    if (typeof ResizeObserver !== "undefined") {
+      const resizeObserver = new ResizeObserver(handleContainerResize);
+      resizeObserver.observe(containerRef.current);
+
+      return () => resizeObserver.disconnect();
     }
   }, [containerDimensions]);
 
@@ -199,7 +226,7 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
     renderer.render(scene, camera);
   }, []);
 
-  // Resize handler - no change needed, already optimized
+  // Resize handler - orthographic camera only
   const handleResize = useCallback(() => {
     const camera = cameraRef.current;
     const renderer = rendererRef.current;
@@ -210,7 +237,17 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
     const width = container.clientWidth;
     const height = container.clientHeight;
 
-    camera.aspect = width / height;
+    // For orthographic camera, adjust frustum to maintain aspect ratio
+    const aspect = width / height;
+    const currentHeight = camera.top - camera.bottom;
+
+    // Keep current zoom level, adjust aspect ratio
+    const newWidth = currentHeight * aspect;
+    const centerX = (camera.left + camera.right) / 2;
+
+    camera.left = centerX - newWidth / 2;
+    camera.right = centerX + newWidth / 2;
+
     camera.updateProjectionMatrix();
     renderer.setSize(width, height);
   }, []);

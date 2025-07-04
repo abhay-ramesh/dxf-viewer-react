@@ -5,7 +5,7 @@ export type ToolType = "pan" | "select" | "measure";
 
 export interface ToolContext {
   scene: THREE.Scene;
-  camera: THREE.PerspectiveCamera;
+  camera: THREE.OrthographicCamera;
   renderer: THREE.WebGLRenderer;
   controls: OrbitControls;
   group: THREE.Group;

@@ -1,7 +1,7 @@
 import * as THREE from "three";
 
 interface CameraSetupResult {
-  camera: THREE.PerspectiveCamera | null;
+  camera: THREE.OrthographicCamera | null;
   center: THREE.Vector3;
 }
 
@@ -22,12 +22,7 @@ export function setupCamera({
   // Handle empty bounding box case
   if (box.isEmpty()) {
     console.log("Camera setup: Empty bounding box, using default position");
-    const camera = new THREE.PerspectiveCamera(
-      45,
-      containerWidth / containerHeight,
-      0.1,
-      10000
-    );
+    const camera = new THREE.OrthographicCamera(-20, 20, 20, -20, 0.1, 10000);
     camera.position.set(0, 0, 10);
     return { camera, center: new THREE.Vector3() };
   }
@@ -36,8 +31,16 @@ export function setupCamera({
   const size = box.getSize(new THREE.Vector3());
   const maxDim = Math.max(size.x, size.y, size.z);
 
-  // Use the same distance calculation as the working main branch
-  // Add a minimum distance to prevent camera from being too close
+  // For orthographic camera, we need to set the view frustum based on content size
+  const aspect = containerWidth / containerHeight;
+  const viewSize = maxDim * 0.8; // Show more content, less zoomed in
+
+  const left = (-viewSize * aspect) / 2;
+  const right = (viewSize * aspect) / 2;
+  const top = viewSize / 2;
+  const bottom = -viewSize / 2;
+
+  // Distance doesn't affect the view in orthographic, but keep it reasonable
   const distance = Math.max(maxDim * 1.5, 10);
 
   console.log("Camera setup:", {
@@ -45,18 +48,21 @@ export function setupCamera({
     size: { x: size.x, y: size.y, z: size.z },
     maxDim,
     distance,
+    viewSize,
+    frustum: { left, right, top, bottom },
     cameraPosition: { x: center.x, y: center.y, z: center.z + distance },
   });
 
-  const camera = new THREE.PerspectiveCamera(
-    45, // Match main branch FOV
-    containerWidth / containerHeight,
+  const camera = new THREE.OrthographicCamera(
+    left,
+    right,
+    top,
+    bottom,
     0.1,
-    10000 // Match main branch far plane
+    10000
   );
 
-  // Position camera directly above the content looking down (for 2D view)
-  // This gives a true 2D perspective perpendicular to the XY plane
+  // Position camera directly above the content looking down (for true 2D view)
   camera.position.set(center.x, center.y, center.z + distance);
   camera.lookAt(center);
 
