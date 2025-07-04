@@ -133,17 +133,7 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
 
   // Process DXF content
   const { group, stats, entities, parseError, dxfHeader } = useMemo(() => {
-    const startTime = performance.now();
-    console.log("🚀 Starting DXF processing...");
-
-    const result = processDxf(dxfContent || "", material, showShapeColors);
-
-    const endTime = performance.now();
-    console.log(
-      `⏱️ DXF processing took: ${(endTime - startTime).toFixed(2)}ms`
-    );
-
-    return result;
+    return processDxf(dxfContent || "", material, showShapeColors);
   }, [dxfContent, material, showShapeColors]);
 
   // Camera setup - memoized to avoid recalculation
@@ -166,9 +156,6 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
   const renderer = useMemo(() => {
     if (!containerDimensions) return null;
 
-    const startTime = performance.now();
-    console.log("🎨 Creating WebGL renderer...");
-
     const renderer = new THREE.WebGLRenderer({
       antialias: true,
       powerPreference: "high-performance",
@@ -177,20 +164,12 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(containerDimensions.width, containerDimensions.height);
 
-    const endTime = performance.now();
-    console.log(
-      `⏱️ Renderer creation took: ${(endTime - startTime).toFixed(2)}ms`
-    );
-
     return renderer;
   }, [containerDimensions]);
 
   // Scene setup - already memoized, but simplified
   const scene = useMemo(() => {
-    const startTime = performance.now();
-    console.log("🏗️ Setting up scene...");
-
-    const result = setupScene({
+    return setupScene({
       backgroundColor,
       showGrid,
       showAxes,
@@ -198,11 +177,6 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
       gridSize: GRID_SIZE,
       axesSize: AXES_SIZE,
     });
-
-    const endTime = performance.now();
-    console.log(`⏱️ Scene setup took: ${(endTime - startTime).toFixed(2)}ms`);
-
-    return result;
   }, [backgroundColor, showGrid, showAxes, group]);
 
   // Controls setup - memoized to avoid recreation
@@ -347,9 +321,6 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
 
   // Main setup effect - now much simpler
   useEffect(() => {
-    const overallStartTime = performance.now();
-    console.log("🔧 Starting main setup effect...");
-
     if (!containerRef.current || !camera || !renderer || !controls || !scene)
       return;
 
@@ -369,22 +340,10 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
     controlsRef.current = controls;
 
     // Append renderer to container
-    const domStartTime = performance.now();
     container.appendChild(renderer.domElement);
-    const domEndTime = performance.now();
-    console.log(
-      `⏱️ DOM append took: ${(domEndTime - domStartTime).toFixed(2)}ms`
-    );
 
     // Start animation loop
-    const animationStartTime = performance.now();
     animate();
-    const animationEndTime = performance.now();
-    console.log(
-      `⏱️ Animation start took: ${(
-        animationEndTime - animationStartTime
-      ).toFixed(2)}ms`
-    );
 
     // Add resize listener
     window.addEventListener("resize", handleResize);
@@ -400,23 +359,6 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
       });
       onLoad(numericStats);
     }
-
-    // Generate debug info if needed
-    if (showDebugInfo) {
-      const statsText = Object.entries(stats)
-        .map(([type, count]) => `${type}: ${count}`)
-        .join("\n");
-
-      // We don't need to store debug info anymore, just log it
-      console.log(`Total entities: ${entities.length}\n${statsText}`);
-    }
-
-    const overallEndTime = performance.now();
-    console.log(
-      `⏱️ TOTAL setup effect took: ${(
-        overallEndTime - overallStartTime
-      ).toFixed(2)}ms`
-    );
 
     // Cleanup
     return () => {
@@ -480,46 +422,99 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
           left: "1rem",
           display: "flex",
           gap: "0.5rem",
+          background: "rgba(255, 255, 255, 0.95)",
+          padding: "0.5rem",
+          borderRadius: "8px",
+          boxShadow: "0 2px 8px rgba(0, 0, 0, 0.15)",
+          border: "1px solid rgba(0, 0, 0, 0.1)",
         }}
       >
         <button
           onClick={() => setCurrentTool("pan")}
           style={{
-            padding: "0.5rem",
-            background: currentTool === "pan" ? "#ff0000" : "#ffffff",
-            color: currentTool === "pan" ? "#ffffff" : "#000000",
-            border: "none",
-            borderRadius: "4px",
+            padding: "0.5rem 0.75rem",
+            background: currentTool === "pan" ? "#0066cc" : "transparent",
+            color: currentTool === "pan" ? "#ffffff" : "#333333",
+            border: currentTool === "pan" ? "none" : "1px solid #e0e0e0",
+            borderRadius: "6px",
             cursor: "pointer",
+            fontSize: "0.875rem",
+            fontWeight: "500",
+            transition: "all 0.2s ease",
+            display: "flex",
+            alignItems: "center",
+            gap: "0.375rem",
+          }}
+          onMouseEnter={(e) => {
+            if (currentTool !== "pan") {
+              e.currentTarget.style.background = "#f5f5f5";
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (currentTool !== "pan") {
+              e.currentTarget.style.background = "transparent";
+            }
           }}
         >
-          Pan
+          ⭐ Pan
         </button>
         <button
           onClick={() => setCurrentTool("select")}
           style={{
-            padding: "0.5rem",
-            background: currentTool === "select" ? "#ff0000" : "#ffffff",
-            color: currentTool === "select" ? "#ffffff" : "#000000",
-            border: "none",
-            borderRadius: "4px",
+            padding: "0.5rem 0.75rem",
+            background: currentTool === "select" ? "#0066cc" : "transparent",
+            color: currentTool === "select" ? "#ffffff" : "#333333",
+            border: currentTool === "select" ? "none" : "1px solid #e0e0e0",
+            borderRadius: "6px",
             cursor: "pointer",
+            fontSize: "0.875rem",
+            fontWeight: "500",
+            transition: "all 0.2s ease",
+            display: "flex",
+            alignItems: "center",
+            gap: "0.375rem",
+          }}
+          onMouseEnter={(e) => {
+            if (currentTool !== "select") {
+              e.currentTarget.style.background = "#f5f5f5";
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (currentTool !== "select") {
+              e.currentTarget.style.background = "transparent";
+            }
           }}
         >
-          Select
+          🎯 Select
         </button>
         <button
           onClick={() => setCurrentTool("measure")}
           style={{
-            padding: "0.5rem",
-            background: currentTool === "measure" ? "#ff0000" : "#ffffff",
-            color: currentTool === "measure" ? "#ffffff" : "#000000",
-            border: "none",
-            borderRadius: "4px",
+            padding: "0.5rem 0.75rem",
+            background: currentTool === "measure" ? "#0066cc" : "transparent",
+            color: currentTool === "measure" ? "#ffffff" : "#333333",
+            border: currentTool === "measure" ? "none" : "1px solid #e0e0e0",
+            borderRadius: "6px",
             cursor: "pointer",
+            fontSize: "0.875rem",
+            fontWeight: "500",
+            transition: "all 0.2s ease",
+            display: "flex",
+            alignItems: "center",
+            gap: "0.375rem",
+          }}
+          onMouseEnter={(e) => {
+            if (currentTool !== "measure") {
+              e.currentTarget.style.background = "#f5f5f5";
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (currentTool !== "measure") {
+              e.currentTarget.style.background = "transparent";
+            }
           }}
         >
-          Measure
+          📏 Measure
         </button>
       </div>
 
@@ -531,17 +526,24 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
             bottom: "1rem",
             left: "50%",
             transform: "translateX(-50%)",
-            background: "rgba(0, 0, 0, 0.85)",
+            background: "rgba(0, 0, 0, 0.9)",
             color: "white",
-            padding: "0.5rem 1rem",
-            borderRadius: "0.5rem",
+            padding: "0.75rem 1.25rem",
+            borderRadius: "8px",
             fontFamily: "monospace",
             fontSize: "0.875rem",
+            fontWeight: "500",
             zIndex: 1000,
-            boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
+            boxShadow: "0 4px 12px rgba(0, 0, 0, 0.25)",
             whiteSpace: "nowrap",
+            border: "1px solid rgba(255, 255, 255, 0.2)",
+            backdropFilter: "blur(10px)",
+            display: "flex",
+            alignItems: "center",
+            gap: "0.5rem",
           }}
         >
+          <span>📏</span>
           {measureText}
         </div>
       )}
@@ -553,18 +555,20 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
             position: "absolute",
             top: "1rem",
             right: "1rem",
-            background: "rgba(0, 0, 0, 0.85)",
-            color: "white",
+            background: "rgba(255, 255, 255, 0.95)",
+            color: "#333333",
             padding: "1rem",
-            borderRadius: "0.5rem",
-            fontFamily: "monospace",
+            borderRadius: "12px",
+            fontFamily: "system-ui, -apple-system, sans-serif",
             fontSize: "0.875rem",
-            minWidth: "250px",
-            maxWidth: "350px",
+            minWidth: "280px",
+            maxWidth: "380px",
             maxHeight: "calc(100% - 2rem)",
             overflowY: "auto",
             zIndex: 1000,
-            boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
+            boxShadow: "0 4px 20px rgba(0, 0, 0, 0.15)",
+            border: "1px solid rgba(0, 0, 0, 0.1)",
+            backdropFilter: "blur(10px)",
           }}
         >
           {/* File & Grid Information Section */}
@@ -572,13 +576,15 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
             <div style={{ marginBottom: "1rem" }}>
               <div
                 style={{
-                  borderBottom: "1px solid rgba(255,255,255,0.3)",
+                  borderBottom: "2px solid #0066cc",
                   paddingBottom: "0.5rem",
-                  marginBottom: "0.5rem",
-                  fontWeight: "bold",
+                  marginBottom: "0.75rem",
+                  fontWeight: "600",
+                  fontSize: "1rem",
+                  color: "#0066cc",
                 }}
               >
-                File & Grid Information
+                📋 File & Grid Information
               </div>
               <div style={{ fontSize: "0.8rem" }}>
                 <div style={{ marginBottom: "0.25rem" }}>
@@ -617,13 +623,15 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
               <div style={{ marginBottom: "1rem" }}>
                 <div
                   style={{
-                    borderBottom: "1px solid rgba(255,255,255,0.3)",
+                    borderBottom: "2px solid #0066cc",
                     paddingBottom: "0.5rem",
-                    marginBottom: "0.5rem",
-                    fontWeight: "bold",
+                    marginBottom: "0.75rem",
+                    fontWeight: "600",
+                    fontSize: "1rem",
+                    color: "#0066cc",
                   }}
                 >
-                  Entity Statistics
+                  📊 Entity Statistics
                 </div>
                 <div style={{ marginBottom: "0.5rem" }}>
                   <strong>Total Entities:</strong> {analyzedData.totalEntities}
@@ -641,28 +649,54 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
               <div style={{ marginBottom: "1rem" }}>
                 <div
                   style={{
-                    borderBottom: "1px solid rgba(255,255,255,0.3)",
+                    borderBottom: "2px solid #0066cc",
                     paddingBottom: "0.5rem",
-                    marginBottom: "0.5rem",
-                    fontWeight: "bold",
+                    marginBottom: "0.75rem",
+                    fontWeight: "600",
+                    fontSize: "1rem",
+                    color: "#0066cc",
                   }}
                 >
-                  Closed Loops ({analyzedData.closedLoops.length})
+                  🔄 Closed Loops ({analyzedData.closedLoops.length})
                 </div>
                 {analyzedData.closedLoops.map((loop, index) => (
                   <div
                     key={index}
                     style={{
                       marginBottom: "0.75rem",
-                      paddingLeft: "0.5rem",
-                      borderLeft: "2px solid rgba(255,255,255,0.3)",
+                      padding: "0.75rem",
+                      borderLeft: "4px solid #0066cc",
+                      background: "rgba(0, 102, 204, 0.1)",
+                      borderRadius: "0 6px 6px 0",
                     }}
                   >
-                    <div style={{ fontWeight: "bold" }}>Loop {index + 1}</div>
-                    <div style={{ paddingLeft: "0.5rem", fontSize: "0.8rem" }}>
-                      <div>Entities: {loop.entities.length}</div>
-                      <div>Area: {loop.area.toFixed(2)} units²</div>
-                      <div>Perimeter: {loop.perimeter.toFixed(2)} units</div>
+                    <div
+                      style={{
+                        fontWeight: "600",
+                        marginBottom: "0.5rem",
+                        color: "#0066cc",
+                      }}
+                    >
+                      Loop {index + 1}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: "0.8rem",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "0.25rem",
+                      }}
+                    >
+                      <div>
+                        <strong>Entities:</strong> {loop.entities.length}
+                      </div>
+                      <div>
+                        <strong>Area:</strong> {loop.area.toFixed(2)} units²
+                      </div>
+                      <div>
+                        <strong>Perimeter:</strong> {loop.perimeter.toFixed(2)}{" "}
+                        units
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -675,13 +709,15 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
             <div>
               <div
                 style={{
-                  borderBottom: "1px solid rgba(255,255,255,0.3)",
+                  borderBottom: "2px solid #0066cc",
                   paddingBottom: "0.5rem",
-                  marginBottom: "0.5rem",
-                  fontWeight: "bold",
+                  marginBottom: "0.75rem",
+                  fontWeight: "600",
+                  fontSize: "1rem",
+                  color: "#0066cc",
                 }}
               >
-                Selected Entity
+                🎯 Selected Entity
               </div>
               <div style={{ paddingLeft: "0.5rem" }}>
                 <div style={{ fontWeight: "bold", marginBottom: "0.25rem" }}>
@@ -727,21 +763,26 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
             position: "absolute",
             top: `${hoverInfo.y + 20}px`,
             left: `${hoverInfo.x + 20}px`,
-            background: "rgba(0, 0, 0, 0.75)",
+            background: "rgba(0, 0, 0, 0.9)",
             color: "white",
-            padding: "0.25rem 0.5rem",
-            borderRadius: "4px",
-            fontSize: "12px",
+            padding: "0.5rem 0.75rem",
+            borderRadius: "6px",
+            fontSize: "0.75rem",
+            fontWeight: "500",
             pointerEvents: "none",
             zIndex: 1001,
+            boxShadow: "0 2px 8px rgba(0, 0, 0, 0.25)",
+            border: "1px solid rgba(255, 255, 255, 0.2)",
+            backdropFilter: "blur(8px)",
+            whiteSpace: "nowrap",
           }}
         >
-          {hoverInfo.info.type}
+          <strong>{hoverInfo.info.type}</strong>
           {hoverInfo.info.length !== undefined && (
-            <span> - Length: {hoverInfo.info.length.toFixed(1)}</span>
+            <span> • Length: {hoverInfo.info.length.toFixed(1)}</span>
           )}
           {hoverInfo.info.radius !== undefined && (
-            <span> - Radius: {hoverInfo.info.radius.toFixed(1)}</span>
+            <span> • Radius: {hoverInfo.info.radius.toFixed(1)}</span>
           )}
         </div>
       )}
@@ -753,12 +794,22 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
             position: "absolute",
             top: "1rem",
             left: "1rem",
-            background: "rgba(255, 0, 0, 0.8)",
+            background: "rgba(220, 53, 69, 0.95)",
             color: "white",
-            padding: "0.5rem",
-            borderRadius: "4px",
+            padding: "0.75rem 1rem",
+            borderRadius: "8px",
+            fontSize: "0.875rem",
+            fontWeight: "500",
+            boxShadow: "0 4px 12px rgba(220, 53, 69, 0.3)",
+            border: "1px solid rgba(255, 255, 255, 0.2)",
+            backdropFilter: "blur(10px)",
+            maxWidth: "300px",
+            display: "flex",
+            alignItems: "center",
+            gap: "0.5rem",
           }}
         >
+          <span>⚠️</span>
           {error}
         </div>
       )}
