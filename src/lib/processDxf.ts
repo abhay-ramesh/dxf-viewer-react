@@ -1726,13 +1726,12 @@ export function processDxf(
   const group = new THREE.Group();
   objects.forEach((obj) => group.add(obj));
 
-  // Calculate the center of the DXF content to position it at origin
+  // Position the DXF content so its left bottom point is at the origin
   const box = new THREE.Box3().setFromObject(group);
   if (!box.isEmpty()) {
-    const center = box.getCenter(new THREE.Vector3());
-    // Translate the group so its center is at (0, 0, 0) - the grid center
+    // Translate the group so its left bottom point is at (0, 0, 0) - the grid origin
     // Keep z at 0 so DXF content appears on top of the grid
-    group.position.set(-center.x, -center.y, 0);
+    group.position.set(-box.min.x, -box.min.y, 0);
   }
 
   geometryCache.clear();
