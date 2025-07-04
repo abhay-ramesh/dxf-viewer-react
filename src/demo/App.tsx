@@ -108,79 +108,111 @@ function App() {
   return (
     <div className="app">
       <header className="header">
-        <h1>DXF Viewer Demo</h1>
-        <div className="controls">
-          <div className="file-controls">
-            <input
-              type="file"
-              accept=".dxf"
-              onChange={handleFileUpload}
-              className="file-input"
-            />
-            <button
-              onClick={() => loadDxfFile("/test.dxf")}
-              className="reset-button"
-            >
-              Reset to test.dxf
-            </button>
+        <div className="header-main">
+          <div className="brand">
+            <h1 className="brand-title">DXF Viewer</h1>
+            <span className="brand-subtitle">Professional CAD File Viewer</span>
           </div>
-          <div className="settings">
-            <label>
+
+          <div className="theme-toggle">
+            <label className="toggle-switch">
               <input
                 type="checkbox"
                 checked={theme === "dark"}
                 onChange={() => setTheme(theme === "light" ? "dark" : "light")}
               />
-              Dark Mode
+              <span className="toggle-slider"></span>
+              <span className="toggle-label">Dark Mode</span>
             </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={viewerSettings.showGrid}
-                onChange={handleSettingChange("showGrid")}
-              />
-              Show Grid
-            </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={viewerSettings.showAxes}
-                onChange={handleSettingChange("showAxes")}
-              />
-              Show Axes
-            </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={viewerSettings.showDebugInfo}
-                onChange={handleSettingChange("showDebugInfo")}
-              />
-              Show Debug Info
-            </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={viewerSettings.showShapeColors}
-                onChange={handleSettingChange("showShapeColors")}
-              />
-              Show Shape Colors
-            </label>
-            <label>
-              Entity Color:
-              <input
-                type="color"
-                value={viewerSettings.entityColor}
-                onChange={handleSettingChange("entityColor")}
-              />
-            </label>
-            <label>
-              Background:
-              <input
-                type="color"
-                value={viewerSettings.backgroundColor}
-                onChange={handleSettingChange("backgroundColor")}
-              />
-            </label>
+          </div>
+        </div>
+
+        <div className="toolbar">
+          <div className="toolbar-group">
+            <div className="file-controls">
+              <div className="file-input-wrapper">
+                <input
+                  type="file"
+                  accept=".dxf"
+                  onChange={handleFileUpload}
+                  className="file-input"
+                  id="file-input"
+                />
+                <label htmlFor="file-input" className="file-input-label">
+                  Choose File
+                </label>
+              </div>
+              <button
+                onClick={() => loadDxfFile("/test.dxf")}
+                className="secondary-button"
+              >
+                Sample
+              </button>
+            </div>
+          </div>
+
+          <div className="toolbar-divider"></div>
+
+          <div className="toolbar-group">
+            <div className="settings-inline">
+              <label className="setting-item">
+                <input
+                  type="checkbox"
+                  checked={viewerSettings.showGrid}
+                  onChange={handleSettingChange("showGrid")}
+                />
+                <span>Grid</span>
+              </label>
+              <label className="setting-item">
+                <input
+                  type="checkbox"
+                  checked={viewerSettings.showAxes}
+                  onChange={handleSettingChange("showAxes")}
+                />
+                <span>Axes</span>
+              </label>
+              <label className="setting-item">
+                <input
+                  type="checkbox"
+                  checked={viewerSettings.showDebugInfo}
+                  onChange={handleSettingChange("showDebugInfo")}
+                />
+                <span>Debug</span>
+              </label>
+              <label className="setting-item">
+                <input
+                  type="checkbox"
+                  checked={viewerSettings.showShapeColors}
+                  onChange={handleSettingChange("showShapeColors")}
+                />
+                <span>Colors</span>
+              </label>
+            </div>
+          </div>
+
+          <div className="toolbar-divider"></div>
+
+          <div className="toolbar-group">
+            <div className="color-controls">
+              <div className="color-input-group">
+                <label className="color-label">Entity</label>
+                <input
+                  type="color"
+                  value={viewerSettings.entityColor}
+                  onChange={handleSettingChange("entityColor")}
+                  className="color-input"
+                />
+              </div>
+              <div className="color-input-group">
+                <label className="color-label">Background</label>
+                <input
+                  type="color"
+                  value={viewerSettings.backgroundColor}
+                  onChange={handleSettingChange("backgroundColor")}
+                  className="color-input"
+                />
+              </div>
+            </div>
           </div>
         </div>
       </header>
