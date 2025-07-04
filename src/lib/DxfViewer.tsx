@@ -70,6 +70,9 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
     width: number;
     height: number;
   } | null>(null);
+  const [currentTool, setCurrentTool] = useState<"pan" | "select" | "measure">(
+    defaultTool
+  );
   const [activeTool, setActiveTool] = useState<Tool | null>(null);
   const [selectedEntityInfo, setSelectedEntityInfo] =
     useState<EntityInfo | null>(null);
@@ -89,6 +92,11 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
       });
     }
   }, [containerDimensions]);
+
+  // Sync currentTool with defaultTool prop changes
+  useEffect(() => {
+    setCurrentTool(defaultTool);
+  }, [defaultTool]);
 
   // Create material outside of useEffect
   const material = useMemo(
@@ -232,21 +240,12 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
     activeTool?.deactivate(toolContext);
 
     // Activate new tool
-    const newTool = tools[defaultTool];
+    const newTool = tools[currentTool as keyof typeof tools];
     newTool.activate(toolContext);
     setActiveTool(newTool);
 
     return () => newTool.deactivate(toolContext);
-  }, [
-    defaultTool,
-    scene,
-    camera,
-    renderer,
-    controls,
-    group,
-    tools,
-    activeTool,
-  ]);
+  }, [currentTool, scene, camera, renderer, controls, group, tools]);
 
   // Handle mouse events
   const handleMouseDown = useCallback(
@@ -447,11 +446,11 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
         }}
       >
         <button
-          onClick={() => setActiveTool(tools.pan)}
+          onClick={() => setCurrentTool("pan")}
           style={{
             padding: "0.5rem",
-            background: activeTool?.type === "pan" ? "#ff0000" : "#ffffff",
-            color: activeTool?.type === "pan" ? "#ffffff" : "#000000",
+            background: currentTool === "pan" ? "#ff0000" : "#ffffff",
+            color: currentTool === "pan" ? "#ffffff" : "#000000",
             border: "none",
             borderRadius: "4px",
             cursor: "pointer",
@@ -460,11 +459,11 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
           Pan
         </button>
         <button
-          onClick={() => setActiveTool(tools.select)}
+          onClick={() => setCurrentTool("select")}
           style={{
             padding: "0.5rem",
-            background: activeTool?.type === "select" ? "#ff0000" : "#ffffff",
-            color: activeTool?.type === "select" ? "#ffffff" : "#000000",
+            background: currentTool === "select" ? "#ff0000" : "#ffffff",
+            color: currentTool === "select" ? "#ffffff" : "#000000",
             border: "none",
             borderRadius: "4px",
             cursor: "pointer",
@@ -473,11 +472,11 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
           Select
         </button>
         <button
-          onClick={() => setActiveTool(tools.measure)}
+          onClick={() => setCurrentTool("measure")}
           style={{
             padding: "0.5rem",
-            background: activeTool?.type === "measure" ? "#ff0000" : "#ffffff",
-            color: activeTool?.type === "measure" ? "#ffffff" : "#000000",
+            background: currentTool === "measure" ? "#ff0000" : "#ffffff",
+            color: currentTool === "measure" ? "#ffffff" : "#000000",
             border: "none",
             borderRadius: "4px",
             cursor: "pointer",
