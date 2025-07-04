@@ -9,6 +9,7 @@ function App() {
   const [dxfContent, setDxfContent] = useState<string>("");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [theme, setTheme] = useState<"light" | "dark">("light");
   const [viewerSettings, setViewerSettings] = useState({
     showGrid: false,
     showAxes: true,
@@ -21,6 +22,29 @@ function App() {
   useEffect(() => {
     loadDxfFile("/test.dxf");
   }, []);
+
+  // Update theme colors when theme changes
+  useEffect(() => {
+    const themeColors = {
+      light: {
+        backgroundColor: "#f8f9fa",
+        entityColor: "#0066cc",
+      },
+      dark: {
+        backgroundColor: "#1a1a1a",
+        entityColor: "#4da6ff",
+      },
+    };
+
+    setViewerSettings((prev) => ({
+      ...prev,
+      backgroundColor: themeColors[theme].backgroundColor,
+      entityColor: themeColors[theme].entityColor,
+    }));
+
+    // Apply theme to document
+    document.documentElement.setAttribute("data-theme", theme);
+  }, [theme]);
 
   useEffect(() => {
     if (!isLoading) {
@@ -101,6 +125,14 @@ function App() {
             </button>
           </div>
           <div className="settings">
+            <label>
+              <input
+                type="checkbox"
+                checked={theme === "dark"}
+                onChange={() => setTheme(theme === "light" ? "dark" : "light")}
+              />
+              Dark Mode
+            </label>
             <label>
               <input
                 type="checkbox"

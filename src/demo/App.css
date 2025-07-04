@@ -1,20 +1,44 @@
+/* CSS Variables for theming */
+:root {
+  --bg-primary: #f8f9fa;
+  --bg-secondary: #ffffff;
+  --text-primary: #333;
+  --text-secondary: #666;
+  --border-color: #eee;
+  --shadow: rgba(0, 0, 0, 0.1);
+  --accent-bg: #f8f9fa;
+}
+
+[data-theme="dark"] {
+  --bg-primary: #1a1a1a;
+  --bg-secondary: #2d2d2d;
+  --text-primary: #ffffff;
+  --text-secondary: #cccccc;
+  --border-color: #444;
+  --shadow: rgba(0, 0, 0, 0.3);
+  --accent-bg: #333;
+}
+
 .app {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background-color: #f8f9fa;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 .header {
   padding: 1rem;
-  background-color: #ffffff;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  background-color: var(--bg-secondary);
+  box-shadow: 0 2px 4px var(--shadow);
+  transition: background-color 0.3s ease, box-shadow 0.3s ease;
 }
 
 .header h1 {
   margin: 0 0 1rem;
   font-size: 1.5rem;
-  color: #333;
+  color: var(--text-primary);
 }
 
 .controls {
@@ -43,10 +67,36 @@
   border-radius: 4px;
   cursor: pointer;
   font-size: 0.9rem;
+  transition: background-color 0.3s ease;
 }
 
 .reset-button:hover {
   background-color: #0052a3;
+}
+
+[data-theme="dark"] .reset-button {
+  background-color: #4da6ff;
+}
+
+[data-theme="dark"] .reset-button:hover {
+  background-color: #3d94e6;
+}
+
+/* Dark mode input styling */
+[data-theme="dark"] input[type="checkbox"] {
+  accent-color: #4da6ff;
+}
+
+[data-theme="dark"] input[type="file"] {
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 0.5rem;
+}
+
+[data-theme="dark"] input[type="color"] {
+  background-color: var(--bg-secondary);
 }
 
 .settings {
@@ -61,25 +111,28 @@
   align-items: center;
   gap: 0.5rem;
   font-size: 0.9rem;
-  color: #666;
+  color: var(--text-secondary);
+  transition: color 0.3s ease;
 }
 
 .settings input[type="color"] {
   width: 40px;
   height: 24px;
   padding: 0;
-  border: 1px solid #ddd;
+  border: 1px solid var(--border-color);
   border-radius: 2px;
+  transition: border-color 0.3s ease;
 }
 
 .viewer-container {
   flex: 1;
   position: relative;
-  background-color: #ffffff;
-  border: 1px solid #eee;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
   margin: 1rem;
   border-radius: 4px;
   overflow: hidden;
+  transition: background-color 0.3s ease, border-color 0.3s ease;
 }
 
 .error {
@@ -97,13 +150,15 @@
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  color: #666;
+  color: var(--text-secondary);
+  transition: color 0.3s ease;
 }
 
 .footer {
   padding: 1rem;
-  background-color: #ffffff;
-  border-top: 1px solid #eee;
+  background-color: var(--bg-secondary);
+  border-top: 1px solid var(--border-color);
+  transition: background-color 0.3s ease, border-color 0.3s ease;
 }
 
 .stats {
@@ -114,7 +169,8 @@
 .stats h3 {
   margin: 0 0 0.5rem;
   font-size: 1rem;
-  color: #333;
+  color: var(--text-primary);
+  transition: color 0.3s ease;
 }
 
 .stats ul {
@@ -127,9 +183,10 @@
 }
 
 .stats li {
-  background-color: #f8f9fa;
+  background-color: var(--accent-bg);
   padding: 0.25rem 0.75rem;
   border-radius: 16px;
   font-size: 0.9rem;
-  color: #666;
+  color: var(--text-secondary);
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
