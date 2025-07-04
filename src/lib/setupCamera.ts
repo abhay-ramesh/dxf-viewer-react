@@ -9,43 +9,56 @@ interface CameraSetupOptions {
   containerWidth: number;
   containerHeight: number;
   group: THREE.Group;
-  fov?: number;
-  near?: number;
-  far?: number;
-  initialPosition?: THREE.Vector3;
 }
 
 export function setupCamera({
   containerWidth,
   containerHeight,
   group,
-  fov = 45,
-  near = 0.1,
-  far = 10000,
-  initialPosition = new THREE.Vector3(0, 0, 100),
 }: CameraSetupOptions): CameraSetupResult {
-  // Calculate bounding box and center
+  // Calculate the bounding box and center of the group
   const box = new THREE.Box3().setFromObject(group);
-  const center = box.isEmpty()
-    ? new THREE.Vector3()
-    : box.getCenter(new THREE.Vector3());
 
-  // Calculate size and camera position
-  const size = box.isEmpty()
-    ? new THREE.Vector3(100, 100, 100)
-    : box.getSize(new THREE.Vector3());
+  // Handle empty bounding box case
+  if (box.isEmpty()) {
+    console.log("Camera setup: Empty bounding box, using default position");
+    const camera = new THREE.PerspectiveCamera(
+      45,
+      containerWidth / containerHeight,
+      0.1,
+      10000
+    );
+    camera.position.set(0, 0, 10);
+    return { camera, center: new THREE.Vector3() };
+  }
 
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
   const maxDim = Math.max(size.x, size.y, size.z);
-  const cameraZ = center.z + maxDim * 1.5;
 
-  // Create and position camera
+  // Use the same distance calculation as the working main branch
+  // Add a minimum distance to prevent camera from being too close
+  const distance = Math.max(maxDim * 1.5, 10);
+
+  console.log("Camera setup:", {
+    center: { x: center.x, y: center.y, z: center.z },
+    size: { x: size.x, y: size.y, z: size.z },
+    maxDim,
+    distance,
+    cameraPosition: { x: center.x, y: center.y, z: center.z + distance },
+  });
+
   const camera = new THREE.PerspectiveCamera(
-    fov,
+    45, // Match main branch FOV
     containerWidth / containerHeight,
-    near,
-    far
+    0.1,
+    10000 // Match main branch far plane
   );
-  camera.position.set(center.x, center.y, cameraZ);
+
+  // Position camera directly above the content looking down (for 2D view)
+  // This gives a true 2D perspective perpendicular to the XY plane
+  camera.position.set(center.x, center.y, center.z + distance);
+  camera.lookAt(center);
 
   return { camera, center };
 }

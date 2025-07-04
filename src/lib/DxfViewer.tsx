@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { processDxf } from "./processDxf";
@@ -59,7 +66,10 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
   const controlsRef = useRef<OrbitControls | null>(null);
   const animationFrameRef = useRef<number>();
   const [error, setError] = useState<string | null>(null);
-  const [debugInfo, setDebugInfo] = useState<string>("");
+  const [containerDimensions, setContainerDimensions] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
   const [activeTool, setActiveTool] = useState<Tool | null>(null);
   const [selectedEntityInfo, setSelectedEntityInfo] =
     useState<EntityInfo | null>(null);
@@ -70,6 +80,16 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
   } | null>(null);
   const [measureText, setMeasureText] = useState<string | null>(null);
 
+  // Track container dimensions when mounted (useLayoutEffect runs synchronously)
+  useLayoutEffect(() => {
+    if (containerRef.current && !containerDimensions) {
+      setContainerDimensions({
+        width: containerRef.current.clientWidth,
+        height: containerRef.current.clientHeight,
+      });
+    }
+  }, [containerDimensions]);
+
   // Create material outside of useEffect
   const material = useMemo(
     () => new THREE.LineBasicMaterial({ color: entityColor }),
@@ -77,14 +97,23 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
   );
 
   // Process DXF content
-  const { group, stats, entities, parseError } = useMemo(
-    () => processDxf(dxfContent, material, showShapeColors),
-    [dxfContent, material, showShapeColors]
-  );
+  const { group, stats, entities, parseError } = useMemo(() => {
+    const startTime = performance.now();
+    console.log("🚀 Starting DXF processing...");
+
+    const result = processDxf(dxfContent || "", material, showShapeColors);
+
+    const endTime = performance.now();
+    console.log(
+      `⏱️ DXF processing took: ${(endTime - startTime).toFixed(2)}ms`
+    );
+
+    return result;
+  }, [dxfContent, material, showShapeColors]);
 
   // Camera setup - memoized to avoid recalculation
   const { camera, center } = useMemo(() => {
-    if (!containerRef.current) {
+    if (!containerDimensions) {
       return {
         camera: null,
         center: new THREE.Vector3(),
@@ -92,15 +121,18 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
     }
 
     return setupCamera({
-      containerWidth: containerRef.current.clientWidth,
-      containerHeight: containerRef.current.clientHeight,
+      containerWidth: containerDimensions.width,
+      containerHeight: containerDimensions.height,
       group,
     });
-  }, [group, containerRef.current]);
+  }, [group, containerDimensions]);
 
   // Renderer setup - memoized to avoid recreation
   const renderer = useMemo(() => {
-    if (!containerRef.current) return null;
+    if (!containerDimensions) return null;
+
+    const startTime = performance.now();
+    console.log("🎨 Creating WebGL renderer...");
 
     const renderer = new THREE.WebGLRenderer({
       antialias: true,
@@ -108,16 +140,22 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
       precision: "mediump",
     });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.setSize(
-      containerRef.current.clientWidth,
-      containerRef.current.clientHeight
+    renderer.setSize(containerDimensions.width, containerDimensions.height);
+
+    const endTime = performance.now();
+    console.log(
+      `⏱️ Renderer creation took: ${(endTime - startTime).toFixed(2)}ms`
     );
+
     return renderer;
-  }, [containerRef.current]);
+  }, [containerDimensions]);
 
   // Scene setup - already memoized, but simplified
   const scene = useMemo(() => {
-    return setupScene({
+    const startTime = performance.now();
+    console.log("🏗️ Setting up scene...");
+
+    const result = setupScene({
       backgroundColor,
       showGrid,
       showAxes,
@@ -126,6 +164,11 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
       gridDivisions: GRID_DIVISIONS,
       axesSize: AXES_SIZE,
     });
+
+    const endTime = performance.now();
+    console.log(`⏱️ Scene setup took: ${(endTime - startTime).toFixed(2)}ms`);
+
+    return result;
   }, [backgroundColor, showGrid, showAxes, group]);
 
   // Controls setup - memoized to avoid recreation
@@ -194,7 +237,16 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
     setActiveTool(newTool);
 
     return () => newTool.deactivate(toolContext);
-  }, [defaultTool, scene, camera, renderer, controls, group, tools]);
+  }, [
+    defaultTool,
+    scene,
+    camera,
+    renderer,
+    controls,
+    group,
+    tools,
+    activeTool,
+  ]);
 
   // Handle mouse events
   const handleMouseDown = useCallback(
@@ -260,38 +312,76 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
 
   // Main setup effect - now much simpler
   useEffect(() => {
+    const overallStartTime = performance.now();
+    console.log("🔧 Starting main setup effect...");
+
     if (!containerRef.current || !camera || !renderer || !controls || !scene)
       return;
+
+    // Capture the current container reference for cleanup
+    const container = containerRef.current;
 
     // Handle errors
     if (parseError) {
       handleDxfError(parseError, setError, onError);
       return;
     }
-    if (entities.length === 0) {
-      handleDxfError(
-        new Error("No entities found in DXF file"),
-        setError,
-        onError
-      );
-      return;
-    }
 
-    // Mount renderer
-    containerRef.current.appendChild(renderer.domElement);
-
-    // Store refs
-    cameraRef.current = camera;
+    // Set refs for use in other effects
     rendererRef.current = renderer;
-    controlsRef.current = controls;
     sceneRef.current = scene;
+    cameraRef.current = camera;
+    controlsRef.current = controls;
 
-    // Start animation and setup resize handler
+    // Append renderer to container
+    const domStartTime = performance.now();
+    container.appendChild(renderer.domElement);
+    const domEndTime = performance.now();
+    console.log(
+      `⏱️ DOM append took: ${(domEndTime - domStartTime).toFixed(2)}ms`
+    );
+
+    // Start animation loop
+    const animationStartTime = performance.now();
     animate();
+    const animationEndTime = performance.now();
+    console.log(
+      `⏱️ Animation start took: ${(
+        animationEndTime - animationStartTime
+      ).toFixed(2)}ms`
+    );
+
+    // Add resize listener
     window.addEventListener("resize", handleResize);
 
-    // Notify load complete
-    onLoad?.(stats);
+    // Call onLoad with stats if provided
+    if (onLoad) {
+      // Filter stats to only include numeric values
+      const numericStats: Record<string, number> = {};
+      Object.entries(stats).forEach(([key, value]) => {
+        if (typeof value === "number") {
+          numericStats[key] = value;
+        }
+      });
+      onLoad(numericStats);
+    }
+
+    // Generate debug info if needed
+    if (showDebugInfo) {
+      const statsText = Object.entries(stats)
+        .map(([type, count]) => `${type}: ${count}`)
+        .join("\n");
+
+      // We don't need to store debug info anymore, just log it
+      console.log(`Total entities: ${entities.length}\n${statsText}`);
+    }
+
+    const overallEndTime = performance.now();
+    console.log(
+      `⏱️ TOTAL setup effect took: ${(
+        overallEndTime - overallStartTime
+      ).toFixed(2)}ms`
+    );
 
     // Cleanup
     return () => {
@@ -308,8 +398,8 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
         }
       });
 
-      if (containerRef.current) {
-        containerRef.current.removeChild(renderer.domElement);
+      if (container.contains(renderer.domElement)) {
+        container.removeChild(renderer.domElement);
       }
     };
   }, [
@@ -326,17 +416,8 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
     handleResize,
     material,
     group,
+    showDebugInfo,
   ]);
-
-  // Update debug info - separate effect with proper deps
-  useEffect(() => {
-    if (showDebugInfo) {
-      const statsText = Object.entries(stats)
-        .map(([type, count]) => `${type}: ${count}`)
-        .join("\n");
-      setDebugInfo(`Total entities: ${entities.length}\n${statsText}`);
-    }
-  }, [showDebugInfo, stats, entities.length]);
 
   // Analyze DXF for closed loops
   const analyzedData = useMemo(() => {

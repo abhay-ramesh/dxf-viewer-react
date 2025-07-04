@@ -147,33 +147,27 @@ export class DxfAnalyzer {
     if (!dxf?.entities) return [];
 
     const entities = dxf.entities;
-    console.log(`=== DXF ANALYZER: Processing ${entities.length} entities ===`);
 
     // Handle circles separately - they are always closed loops
     const loops: ClosedLoop[] = [];
     const processedEntities: IEntity[] = [];
 
     // Add circles and closed polylines as individual closed loops
-    entities.forEach((entity, index) => {
-      console.log(`Processing entity ${index + 1}: ${entity.type}`);
-
+    entities.forEach((entity) => {
       if (isCircleEntity(entity)) {
         const loop = this.createCircleLoop(entity);
         if (loop) {
           loops.push(loop);
-          console.log(`Added circle as closed loop`);
         }
       } else if (isArcEntity(entity) && isFullCircleArc(entity)) {
         const loop = this.createFullCircleArcLoop(entity);
         if (loop) {
           loops.push(loop);
-          console.log(`Added full-circle arc as closed loop`);
         }
       } else if (isSplineEntity(entity) && this.isClosedSpline(entity)) {
         const loop = this.createSplineLoop(entity);
         if (loop) {
           loops.push(loop);
-          console.log(`Added closed spline as closed loop`);
         }
       } else if (
         isLwpolylineEntity(entity) &&
@@ -182,7 +176,6 @@ export class DxfAnalyzer {
         const loop = this.createLwpolylineLoop(entity);
         if (loop) {
           loops.push(loop);
-          console.log(`Added closed LWPOLYLINE as closed loop`);
         }
       } else if (
         isPolylineEntity(entity) &&
@@ -192,12 +185,8 @@ export class DxfAnalyzer {
         const loop = this.createPolylineLoop(entity as IPolylineEntity);
         if (loop) {
           loops.push(loop);
-          console.log(`Added closed POLYLINE as closed loop`);
         }
       } else {
-        console.log(
-          `Adding ${entity.type} to processedEntities for connectivity analysis`
-        );
         processedEntities.push(entity);
       }
     });
@@ -208,7 +197,6 @@ export class DxfAnalyzer {
       loops.push(...connectedLoops);
     }
 
-    console.log(`Final result: ${loops.length} unique closed loops`);
     return loops;
   }
 
@@ -296,9 +284,6 @@ export class DxfAnalyzer {
   ): boolean {
     if (!entity.vertices || entity.vertices.length < 3) return false;
 
-    console.log(`Checking ${entity.type} for closure...`);
-    console.log(`Entity:`, entity);
-
     // Handle LWPOLYLINE and POLYLINE separately due to different structures
     if (entity.type === "LWPOLYLINE") {
       return this.isClosedLwpolyline(entity as ILwpolylineEntity);
@@ -310,16 +295,9 @@ export class DxfAnalyzer {
   }
 
   private static isClosedLwpolyline(entity: ILwpolylineEntity): boolean {
-    console.log(`=== LWPOLYLINE Closure Check ===`);
-    console.log(
-      `Shape property: ${entity.shape} (type: ${typeof entity.shape})`
-    );
-    console.log(`Vertices count: ${entity.vertices?.length || 0}`);
-
     // LWPOLYLINE uses 'shape' property (lwpolyline.js line 20)
     // entity.shape = ((curr.value & 1) === 1) - boolean true/false
     const isClosedByShape = entity.shape === true;
-    console.log(`Closed by shape flag: ${isClosedByShape}`);
 
     // Check geometric closure for LWPOLYLINE vertices
     let isGeometricallyClosed = false;
@@ -339,33 +317,20 @@ export class DxfAnalyzer {
           Math.pow(first.x - last.x, 2) + Math.pow(first.y - last.y, 2)
         );
         isGeometricallyClosed = distance < 0.001;
-        console.log(`First vertex: {${first.x}, ${first.y}}`);
-        console.log(`Last vertex: {${last.x}, ${last.y}}`);
-        console.log(
-          `Distance: ${distance}, Geometrically closed: ${isGeometricallyClosed}`
-        );
       }
     }
 
     const result = isClosedByShape || isGeometricallyClosed;
-    console.log(`LWPOLYLINE final closure result: ${result}`);
     return result;
   }
 
   private static isClosedRegularPolyline(entity: IPolylineEntity): boolean {
-    console.log(`=== POLYLINE Closure Check ===`);
-    console.log(
-      `Shape property: ${entity.shape} (type: ${typeof entity.shape})`
-    );
-
     // POLYLINE also uses 'shape' property (polyline.js line 29)
     // entity.shape = (curr.value & 1) !== 0 - boolean true/false
     const isClosedByShape = entity.shape === true;
-    console.log(`Closed by shape flag: ${isClosedByShape}`);
 
     // Note: POLYLINE vertices are IVertexEntity objects, more complex structure
     const result = isClosedByShape;
-    console.log(`POLYLINE final closure result: ${result}`);
     return result;
   }
 
@@ -437,12 +402,6 @@ export class DxfAnalyzer {
     const area = this.calculateArea(vertices);
     const perimeter = this.calculatePerimeter(vertices);
 
-    console.log(
-      `Created LWPOLYLINE loop: ${vertices.length} vertices, area=${Math.abs(
-        area
-      ).toFixed(2)}`
-    );
-
     return {
       entities: [entity],
       vertices,
@@ -470,12 +429,6 @@ export class DxfAnalyzer {
     const area = this.calculateArea(vertices);
     const perimeter = this.calculatePerimeter(vertices);
 
-    console.log(
-      `Created POLYLINE loop: ${vertices.length} vertices, area=${Math.abs(
-        area
-      ).toFixed(2)}`
-    );
-
     return {
       entities: [entity],
       vertices,
@@ -490,18 +443,13 @@ export class DxfAnalyzer {
     // Try different tolerance levels
     for (const tolerance of this.FALLBACK_TOLERANCES) {
       this.TOLERANCE = tolerance;
-      console.log(`Trying connectivity analysis with tolerance: ${tolerance}`);
 
       const connectedGroups = this.analyzeConnectivity(entities);
-      console.log(`Found ${connectedGroups.length} connected groups`);
 
       for (const group of connectedGroups) {
         const loop = this.traceConnectedLoop(group, entities);
         if (loop && loop.entities.length >= 1) {
           loops.push(loop);
-          console.log(
-            `Created loop from ${loop.entities.length} connected entities`
-          );
         }
       }
 
@@ -524,10 +472,6 @@ export class DxfAnalyzer {
     if (endpoints.length < 4) {
       return [];
     }
-
-    console.log(
-      `Analyzing ${endpoints.length} endpoints from ${entities.length} entities`
-    );
 
     // Build connectivity graph using flood-fill
     const visited = new Set<number>();
@@ -572,7 +516,6 @@ export class DxfAnalyzer {
         // Include single entities that might be closed shapes (like LWPOLYLINE)
         // Multi-entity groups need at least 3 entities for meaningful loops
         connectedGroups.push(group);
-        console.log(`Found connected group with ${group.length} entities`);
       }
     }
 
@@ -738,31 +681,18 @@ export class DxfAnalyzer {
     // Handle single entities that can form closed loops
     if (groupEntities.length === 1) {
       const entity = groupEntities[0];
-      console.log(`Processing single entity: ${entity.type}`);
 
       // Check if this single entity represents a closed shape
       if (isPolylineEntity(entity)) {
-        console.log(`Checking if ${entity.type} is closed...`);
         const isClosed = this.isClosedPolyline(entity);
-        console.log(`${entity.type} closed check result: ${isClosed}`);
 
         if (isClosed) {
           const vertices: Point2D[] = [];
           this.addEntityVertices(entity, vertices);
 
-          console.log(
-            `Generated ${vertices.length} vertices for ${entity.type}`
-          );
-
           if (vertices.length >= 3) {
             const area = this.calculateArea(vertices);
             const perimeter = this.calculatePerimeter(vertices);
-
-            console.log(
-              `Created closed loop from single ${entity.type}: area=${Math.abs(
-                area
-              ).toFixed(2)}, perimeter=${perimeter.toFixed(2)}`
-            );
 
             return {
               entities: groupEntities,
@@ -775,7 +705,6 @@ export class DxfAnalyzer {
       }
 
       // Single entities that aren't closed shapes should be skipped
-      console.log(`Skipping single ${entity.type} - not a closed shape`);
       return null;
     }
 

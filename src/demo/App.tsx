@@ -3,10 +3,12 @@ import { DxfViewer } from "../lib";
 import "./App.css";
 
 function App() {
+  console.log("🚀 App component initialized");
+  const appStartTime = performance.now();
+
   const [dxfContent, setDxfContent] = useState<string>("");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [entityStats, setEntityStats] = useState<Record<string, number>>({});
   const [viewerSettings, setViewerSettings] = useState({
     showGrid: true,
     showAxes: true,
@@ -19,6 +21,17 @@ function App() {
   useEffect(() => {
     loadDxfFile("/test.dxf");
   }, []);
+
+  useEffect(() => {
+    if (!isLoading) {
+      const appEndTime = performance.now();
+      console.log(
+        `⏱️ TOTAL app initialization took: ${(
+          appEndTime - appStartTime
+        ).toFixed(2)}ms`
+      );
+    }
+  }, [isLoading, appStartTime]);
 
   const loadDxfFile = async (path: string) => {
     setIsLoading(true);
@@ -148,7 +161,7 @@ function App() {
           <DxfViewer
             dxfContent={dxfContent}
             {...viewerSettings}
-            onLoad={setEntityStats}
+            onLoad={() => {}}
             onError={(error) => setError(error.message)}
             showDebug={true}
           />

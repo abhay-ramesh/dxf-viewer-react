@@ -367,65 +367,47 @@ function separateOuterLoopsFromHoles(
     perimeter: number;
   }>
 ) {
-  const outerLoops: typeof loops = [];
-  const holes: typeof loops = [];
+  const outerLoops: Array<{
+    entities: IEntity[];
+    vertices: Array<{ x: number; y: number }>;
+    area: number;
+    perimeter: number;
+  }> = [];
+  const holes: Array<{
+    entities: IEntity[];
+    vertices: Array<{ x: number; y: number }>;
+    area: number;
+    perimeter: number;
+  }> = [];
 
   if (loops.length === 0) return { outerLoops, holes };
 
-  console.log("=== GEOMETRIC NESTING ANALYSIS ===");
-  console.log(`Total loops to classify: ${loops.length}`);
-
   // Calculate nesting level for each loop using proper containment relationships
-  const nestingData = loops.map((loop, index) => {
+  const nestingData = loops.map((loop) => {
     let nestingLevel = 0;
 
     // Count how many other loops completely contain this loop
     for (let j = 0; j < loops.length; j++) {
-      if (j !== index && isLoopContainedInLoopEnhanced(loop, loops[j])) {
+      if (loops[j] !== loop && isLoopContainedInLoopEnhanced(loop, loops[j])) {
         nestingLevel++;
       }
     }
 
-    console.log(
-      `Loop ${index + 1}: Nesting level ${nestingLevel}, Area: ${Math.abs(
-        loop.area
-      ).toFixed(2)}`
-    );
-
-    return { loop, nestingLevel, index };
+    return { loop, nestingLevel };
   });
 
   // Geometric classification rule:
   // - Even nesting levels (0, 2, 4...) = Outer boundaries (fills)
   // - Odd nesting levels (1, 3, 5...) = Holes
-  for (const { loop, nestingLevel, index } of nestingData) {
+  for (const { loop, nestingLevel } of nestingData) {
     const isHole = nestingLevel % 2 === 1;
 
     if (isHole) {
       holes.push(loop);
-      console.log(
-        `Loop ${
-          index + 1
-        }: HOLE (nesting level ${nestingLevel}) - Area: ${Math.abs(
-          loop.area
-        ).toFixed(2)}`
-      );
     } else {
       outerLoops.push(loop);
-      console.log(
-        `Loop ${
-          index + 1
-        }: FILL (nesting level ${nestingLevel}) - Area: ${Math.abs(
-          loop.area
-        ).toFixed(2)}`
-      );
     }
   }
-
-  console.log(
-    `Final geometric classification: ${outerLoops.length} fills, ${holes.length} holes`
-  );
-  console.log("=== END GEOMETRIC ANALYSIS ===");
 
   return { outerLoops, holes };
 }
@@ -648,11 +630,8 @@ function createOrderedLoopsFromConnectivity({
   area: number;
   perimeter: number;
 }> {
-  console.log("Creating ordered loops from connectivity analysis...");
-
   // Step 1: Use DxfAnalyzer to get connected groups (all 73 groups)
   const dxfAnalyzerLoops = DxfAnalyzer.findClosedLoops({ entities });
-  console.log(`DxfAnalyzer found ${dxfAnalyzerLoops.length} connected groups`);
 
   const orderedLoops: Array<{
     entities: IEntity[];
@@ -681,14 +660,10 @@ function createOrderedLoopsFromConnectivity({
       });
     } else {
       // Fallback to DxfAnalyzer's vertices if sequential ordering fails
-      console.warn(
-        `Sequential ordering failed for ${dxfLoop.entities.length} entities, using DxfAnalyzer fallback`
-      );
       orderedLoops.push(dxfLoop);
     }
   }
 
-  console.log(`Created ${orderedLoops.length} properly ordered loops`);
   return orderedLoops;
 }
 
@@ -1348,53 +1323,6 @@ function calculateLoopPerimeter(
   return perimeter;
 }
 
-// Add comprehensive LWPOLYLINE diagnostic function
-function debugLwpolylineEntity(entity: IEntity, index: number) {
-  if (entity.type !== "LWPOLYLINE") return;
-
-  console.log(`🔍 === COMPREHENSIVE LWPOLYLINE DIAGNOSTIC ${index + 1} ===`);
-
-  // Cast to expected types
-  const lwpoly = entity as ILwpolylineEntity;
-  const entityWithShape = entity as IEntity & { shape?: boolean | number };
-
-  // Log all possible properties
-  console.log(`📋 Raw entity object:`, entity);
-  console.log(`📏 Type: ${entity.type}`);
-  console.log(`🔗 Shape property (ILwpolylineEntity): ${lwpoly.shape}`);
-  console.log(`🔗 Shape property (generic cast): ${entityWithShape.shape}`);
-  console.log(`📍 Vertices count: ${lwpoly.vertices?.length || "undefined"}`);
-  console.log(`📍 Vertices array:`, lwpoly.vertices);
-
-  // Test geometric closure
-  if (lwpoly.vertices && lwpoly.vertices.length > 2) {
-    const first = lwpoly.vertices[0];
-    const last = lwpoly.vertices[lwpoly.vertices.length - 1];
-    const distance = Math.sqrt(
-      Math.pow(first.x - last.x, 2) + Math.pow(first.y - last.y, 2)
-    );
-    console.log(`📐 First vertex: {x: ${first.x}, y: ${first.y}}`);
-    console.log(`📐 Last vertex: {x: ${last.x}, y: ${last.y}}`);
-    console.log(`📏 Geometric closure distance: ${distance}`);
-    console.log(`✅ Geometrically closed: ${distance < 0.01}`);
-  }
-
-  // Test all detection methods
-  const detectionResults = {
-    shapeFlag: lwpoly.shape === true,
-    shapeAsNumber: typeof lwpoly.shape === "number" && lwpoly.shape === 1,
-    shapeAny: Boolean(lwpoly.shape),
-    genericShape: Boolean(entityWithShape.shape),
-  };
-  console.log(`🎯 Detection results:`, detectionResults);
-
-  // Test type guards
-  console.log(`🔍 isPolylineEntity result: ${isPolylineEntity(entity)}`);
-  console.log(`🔍 isLwpolylineEntity result: ${isLwpolylineEntity(entity)}`);
-
-  console.log(`🔍 === END LWPOLYLINE DIAGNOSTIC ${index + 1} ===\n`);
-}
-
 // Create shape with geometric holes using THREE.js Shape.holes
 function createShapeWithHoles(
   outerLoop: {
@@ -1423,12 +1351,10 @@ function createShapeWithHoles(
       const distance = Math.sqrt(
         Math.pow(vertex.x - prev.x, 2) + Math.pow(vertex.y - prev.y, 2)
       );
-      return distance > 0.001;
+      return distance > 0.001; // Keep vertices that are far enough apart
     });
 
-    if (cleanVertices.length < 3) return null;
-
-    // Create outer boundary
+    // Build main shape
     mainShape.moveTo(cleanVertices[0].x, cleanVertices[0].y);
     for (let i = 1; i < cleanVertices.length; i++) {
       mainShape.lineTo(cleanVertices[i].x, cleanVertices[i].y);
@@ -1436,10 +1362,8 @@ function createShapeWithHoles(
     mainShape.closePath();
 
     // Add holes to the main shape
-    containedHoles.forEach((hole, holeIndex) => {
+    containedHoles.forEach((hole) => {
       if (hole.vertices.length < 3) return;
-
-      const holeShape = new THREE.Shape();
 
       // Clean hole vertices
       const cleanHoleVertices = hole.vertices.filter((vertex, index) => {
@@ -1453,24 +1377,18 @@ function createShapeWithHoles(
 
       if (cleanHoleVertices.length < 3) return;
 
-      // Create hole shape (note: holes should be wound opposite to outer shape)
+      // Create hole shape
+      const holeShape = new THREE.Shape();
       holeShape.moveTo(cleanHoleVertices[0].x, cleanHoleVertices[0].y);
       for (let i = 1; i < cleanHoleVertices.length; i++) {
         holeShape.lineTo(cleanHoleVertices[i].x, cleanHoleVertices[i].y);
       }
       holeShape.closePath();
 
-      // Add to main shape's holes array
+      // Add as hole to main shape
       mainShape.holes.push(holeShape);
-
-      console.log(
-        `Added hole ${holeIndex + 1} with ${
-          cleanHoleVertices.length
-        } vertices to main shape`
-      );
     });
 
-    console.log(`Created shape with ${containedHoles.length} geometric holes`);
     return new THREE.ShapeGeometry(mainShape);
   } catch (error) {
     console.warn("Failed to create shape with holes:", error);
@@ -1501,16 +1419,13 @@ function groupHolesWithOuterLoops(
     containedHoles: typeof holes;
   }> = [];
 
-  outerLoops.forEach((outerLoop, outerIndex) => {
+  outerLoops.forEach((outerLoop) => {
     const containedHoles: typeof holes = [];
 
     // Find holes contained within this outer loop
-    holes.forEach((hole, holeIndex) => {
+    holes.forEach((hole) => {
       if (isLoopContainedInLoopEnhanced(hole, outerLoop)) {
         containedHoles.push(hole);
-        console.log(
-          `Hole ${holeIndex + 1} is contained in outer loop ${outerIndex + 1}`
-        );
       }
     });
 
@@ -1518,10 +1433,6 @@ function groupHolesWithOuterLoops(
       outerLoop,
       containedHoles,
     });
-
-    console.log(
-      `Outer loop ${outerIndex + 1} contains ${containedHoles.length} holes`
-    );
   });
 
   return groupedShapes;
@@ -1532,7 +1443,10 @@ export function processDxf(
   material: THREE.Material,
   showShapeColors: boolean = true
 ): ProcessDxfResult {
+  const totalStartTime = performance.now();
+
   // Parse DXF
+  const parseStartTime = performance.now();
   let entities: IEntity[] = [];
   let parseError: Error | null = null;
   try {
@@ -1543,162 +1457,81 @@ export function processDxf(
       error instanceof Error ? error : new Error("Failed to parse DXF");
     return { group: new THREE.Group(), stats: {}, entities: [], parseError };
   }
-
-  // Debug entity counts by type
-  const entityCounts: Record<string, number> = {};
-  entities.forEach((entity) => {
-    entityCounts[entity.type] = (entityCounts[entity.type] || 0) + 1;
-  });
-  console.log("Entity type counts:", entityCounts);
-
-  // Check for unclosed polylines that might form closed shapes
-  let unclosedPolylineCount = 0;
-  let closedPolylineCount = 0;
-  entities.forEach((entity, index) => {
-    // Run comprehensive diagnostic for LWPOLYLINE entities
-    debugLwpolylineEntity(entity, index);
-
-    if (entity.type === "POLYLINE" || entity.type === "LWPOLYLINE") {
-      const poly = entity as IPolylineEntity;
-      console.log(`=== ${entity.type} Entity ${index + 1} Debug ===`);
-      console.log(`shape property:`, poly.shape);
-      console.log(`vertices count:`, poly.vertices?.length || 0);
-      console.log(`entity:`, entity);
-
-      if (poly.shape === true) {
-        closedPolylineCount++;
-        console.log(`${entity.type} ${index + 1}: CLOSED by shape flag`);
-      } else if (poly.vertices && poly.vertices.length > 2) {
-        const first = poly.vertices[0];
-        const last = poly.vertices[poly.vertices.length - 1];
-        const distance = Math.sqrt(
-          Math.pow(first.x - last.x, 2) + Math.pow(first.y - last.y, 2)
-        );
-        console.log(`${entity.type} ${index + 1}: First vertex:`, first);
-        console.log(`${entity.type} ${index + 1}: Last vertex:`, last);
-        console.log(
-          `${entity.type} ${index + 1}: Distance between first/last:`,
-          distance
-        );
-
-        if (distance < 0.01) {
-          closedPolylineCount++;
-          console.log(
-            `${entity.type} ${index + 1}: CLOSED by geometric closure`
-          );
-        } else {
-          unclosedPolylineCount++;
-          console.log(
-            `${entity.type} ${index + 1}: OPEN - no closure detected`
-          );
-        }
-      } else {
-        unclosedPolylineCount++;
-        console.log(
-          `${entity.type} ${
-            index + 1
-          }: OPEN - insufficient vertices or missing vertices`
-        );
-      }
-      console.log(`=== End ${entity.type} Entity ${index + 1} Debug ===`);
-    }
-  });
+  const parseEndTime = performance.now();
   console.log(
-    `Polyline analysis: ${closedPolylineCount} closed, ${unclosedPolylineCount} unclosed`
+    `📄 DXF parsing took: ${(parseEndTime - parseStartTime).toFixed(2)}ms`
   );
 
-  // Debug: Check what we're actually getting from DXF parser
-  console.log(`=== DXF PARSING DEBUG ===`);
-  console.log(`Total entities from parser: ${entities.length}`);
+  // Only do expensive analysis if we need shape colors
+  let outerLoops: Array<{
+    entities: IEntity[];
+    vertices: Array<{ x: number; y: number }>;
+    area: number;
+    perimeter: number;
+  }> = [];
+  let holes: Array<{
+    entities: IEntity[];
+    vertices: Array<{ x: number; y: number }>;
+    area: number;
+    perimeter: number;
+  }> = [];
 
-  // Group entities by type with detailed info
-  const entityDetails: Record<string, EntityDetails[]> = {};
-  entities.forEach((entity, index) => {
-    if (!entityDetails[entity.type]) {
-      entityDetails[entity.type] = [];
-    }
+  if (showShapeColors) {
+    const analysisStartTime = performance.now();
+    console.log("🔍 Starting geometric analysis...");
 
-    // Use proper type checking instead of any
-    entityDetails[entity.type].push({
-      index,
-      entity,
-      hasShapeFlag: hasShapeProperty(entity) ? entity.shape : undefined,
-      hasVertices: hasVertices(entity),
-      vertexCount: hasVertices(entity) ? entity.vertices.length : 0,
-    });
-  });
+    // Find closed loops using enhanced approach
+    const closedLoops = createOrderedLoopsFromConnectivity({ entities });
 
-  Object.entries(entityDetails).forEach(([type, details]) => {
-    console.log(`${type}: ${details.length} entities`);
-    if (type === "POLYLINE" || type === "LWPOLYLINE") {
-      const withShapeFlag = details.filter(
-        (d) => d.hasShapeFlag === true
-      ).length;
-      const withVertices = details.filter((d) => d.hasVertices).length;
-      console.log(`  - With shape=true: ${withShapeFlag}`);
-      console.log(`  - With vertices: ${withVertices}`);
-      console.log(
-        `  - Sample vertex counts: ${details
-          .slice(0, 5)
-          .map((d) => d.vertexCount)
-          .join(", ")}`
-      );
-    }
-  });
-  console.log(`=== END DXF DEBUG ===`);
+    // Separate outer loops from holes
+    const result = separateOuterLoopsFromHoles(closedLoops);
+    outerLoops = result.outerLoops;
+    holes = result.holes;
 
-  // Find closed loops using enhanced approach: DxfAnalyzer connectivity + proper ordering
-  console.log(`=== CALLING DxfAnalyzer ===`);
-  const closedLoops = createOrderedLoopsFromConnectivity({ entities });
-  console.log(
-    `Found ${closedLoops.length} total closed loops with proper ordering`
-  );
-  console.log(`Closed loops details:`);
-  closedLoops.forEach((loop, i) => {
+    const analysisEndTime = performance.now();
     console.log(
-      `Loop ${i + 1}: ${loop.entities.length} entities, area=${Math.abs(
-        loop.area
-      ).toFixed(2)}`
+      `⏱️ Geometric analysis took: ${(
+        analysisEndTime - analysisStartTime
+      ).toFixed(2)}ms`
     );
-    loop.entities.forEach((entity, j) => {
-      console.log(`  Entity ${j + 1}: ${entity.type}`);
-    });
-  });
-  console.log(`=== END DxfAnalyzer RESULTS ===`);
-
-  // Separate outer loops from holes
-  const { outerLoops, holes } = separateOuterLoopsFromHoles(closedLoops);
-  console.log(
-    `Identified ${outerLoops.length} outer loops and ${holes.length} holes`
-  );
-
-  // Debug classification details
-  console.log("=== LOOP CLASSIFICATION DEBUG ===");
-  outerLoops.forEach((loop, i) => {
-    console.log(
-      `OUTER ${i + 1}: Area=${loop.area.toFixed(2)}, Entities=${
-        loop.entities.length
-      }, Perimeter=${loop.perimeter.toFixed(2)}`
-    );
-  });
-  holes.forEach((hole, i) => {
-    console.log(
-      `HOLE ${i + 1}: Area=${hole.area.toFixed(2)}, Entities=${
-        hole.entities.length
-      }, Perimeter=${hole.perimeter.toFixed(2)}`
-    );
-  });
-  console.log("=== END DEBUG ===");
+  } else {
+    // Skip shape analysis when colors are disabled for better performance
+  }
 
   // Create a set of entities that are part of closed loops
   const closedLoopEntities = new Set();
-  closedLoops.forEach((loop) => {
-    loop.entities.forEach((entity) => {
-      closedLoopEntities.add(entity);
+  if (showShapeColors) {
+    [...outerLoops, ...holes].forEach((loop) => {
+      loop.entities.forEach((entity) => {
+        closedLoopEntities.add(entity);
+      });
+    });
+  }
+
+  // Group entities by type with detailed info
+  const groupedEntities: Record<string, EntityDetails[]> = {};
+  entities.forEach((entity, index) => {
+    if (!groupedEntities[entity.type]) {
+      groupedEntities[entity.type] = [];
+    }
+
+    const hasShapeFlag = hasShapeProperty(entity) ? entity.shape : undefined;
+    const hasVerticesFlag = hasVertices(entity);
+    const vertexCount = hasVerticesFlag ? entity.vertices.length : 0;
+
+    groupedEntities[entity.type].push({
+      index,
+      entity,
+      hasShapeFlag,
+      hasVertices: hasVerticesFlag,
+      vertexCount,
     });
   });
 
   // Process entities
+  const entityProcessingStartTime = performance.now();
+  console.log("🏗️ Starting entity processing...");
+
   const stats: Record<string, number | string> = {};
   const objects: THREE.Object3D[] = [];
   const geometryCache = new Map<string, THREE.BufferGeometry>();
@@ -1840,14 +1673,6 @@ export function processDxf(
           shapeMesh.position.z = -0.001;
 
           objects.push(shapeMesh);
-
-          console.log(
-            `Created shape ${index + 1} with ${
-              shapeGroup.containedHoles.length
-            } geometric holes, color #${fillColor
-              .toString(16)
-              .padStart(6, "0")}`
-          );
         }
       } catch (error) {
         console.error(
@@ -1873,7 +1698,6 @@ export function processDxf(
             );
             fallbackMesh.position.z = -0.001;
             objects.push(fallbackMesh);
-            console.log(`Created fallback shape ${index + 1} without holes`);
           }
         } catch (fallbackError) {
           console.error(
@@ -1884,7 +1708,7 @@ export function processDxf(
       }
     });
   } else {
-    console.log("Shape colors disabled - skipping shape creation");
+    // Skip shape creation when colors are disabled for better performance
   }
 
   // Create group and add objects
@@ -1894,7 +1718,7 @@ export function processDxf(
 
   // Update stats
   if (outerLoops.length > 0 || holes.length > 0) {
-    stats["TOTAL_CLOSED_LOOPS"] = closedLoops.length;
+    stats["TOTAL_CLOSED_LOOPS"] = outerLoops.length + holes.length;
     if (showShapeColors) {
       stats["SHAPES_WITH_HOLES"] = groupedShapes.length;
       stats["TOTAL_HOLES"] = holes.length;
@@ -1904,6 +1728,18 @@ export function processDxf(
       stats["DETECTION_METHOD"] = "DISABLED";
     }
   }
+
+  const entityProcessingEndTime = performance.now();
+  console.log(
+    `🏗️ Entity processing took: ${(
+      entityProcessingEndTime - entityProcessingStartTime
+    ).toFixed(2)}ms`
+  );
+
+  const totalEndTime = performance.now();
+  console.log(
+    `⏱️ TOTAL processDxf took: ${(totalEndTime - totalStartTime).toFixed(2)}ms`
+  );
 
   return { group, stats, entities, parseError };
 }
