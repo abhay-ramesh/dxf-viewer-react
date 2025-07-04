@@ -10,7 +10,7 @@ function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [viewerSettings, setViewerSettings] = useState({
-    showGrid: true,
+    showGrid: false,
     showAxes: true,
     showDebugInfo: false,
     showShapeColors: true,
@@ -163,7 +163,6 @@ function App() {
             {...viewerSettings}
             onLoad={() => {}}
             onError={(error) => setError(error.message)}
-            showDebug={true}
           />
         ) : null}
       </main>
