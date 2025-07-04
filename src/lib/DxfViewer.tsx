@@ -17,9 +17,9 @@ import { DxfViewerProps } from "./types";
 import { DxfAnalyzer } from "./utils/DxfAnalyzer";
 
 // Reusable constants and geometries
-const GRID_SIZE = 1000;
+const GRID_SIZE = 100;
 
-const AXES_SIZE = 500;
+const AXES_SIZE = 50;
 
 // Error handling functions
 const handleDxfError = (
@@ -582,8 +582,21 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
               </div>
               <div style={{ fontSize: "0.8rem" }}>
                 <div style={{ marginBottom: "0.25rem" }}>
-                  <strong>DXF Units:</strong> {stats.DXF_UNITS || "Unknown"}
+                  <strong>Drawing Units:</strong> {stats.DXF_UNITS || "Unknown"}
                 </div>
+                {stats.DXF_UNITS_FORMAT &&
+                  stats.DXF_UNITS_FORMAT !== "Unknown" && (
+                    <div style={{ marginBottom: "0.25rem" }}>
+                      <strong>Units Format:</strong> {stats.DXF_UNITS_FORMAT}
+                    </div>
+                  )}
+                {stats.DXF_MEASUREMENT &&
+                  stats.DXF_MEASUREMENT !== "Unknown" && (
+                    <div style={{ marginBottom: "0.25rem" }}>
+                      <strong>Measurement System:</strong>{" "}
+                      {stats.DXF_MEASUREMENT}
+                    </div>
+                  )}
                 <div style={{ marginBottom: "0.25rem" }}>
                   <strong>Grid Size:</strong> {stats.GRID_SIZE} units
                 </div>

@@ -1739,34 +1739,156 @@ export function processDxf(
 
   // Extract DXF header information for units
   let units = "Unknown";
+  let unitsFormat = "Unknown";
+  let measurement = "Unknown";
+
   if (dxfData?.header) {
+    // Get $INSUNITS (preferred - actual drawing units)
+    const insunits = dxfData.header.$INSUNITS as number;
+    if (insunits !== undefined) {
+      switch (insunits) {
+        case 0:
+          units = "Unitless";
+          break;
+        case 1:
+          units = "Inches";
+          break;
+        case 2:
+          units = "Feet";
+          break;
+        case 3:
+          units = "Miles";
+          break;
+        case 4:
+          units = "Millimeters";
+          break;
+        case 5:
+          units = "Centimeters";
+          break;
+        case 6:
+          units = "Meters";
+          break;
+        case 7:
+          units = "Kilometers";
+          break;
+        case 8:
+          units = "Microinches";
+          break;
+        case 9:
+          units = "Mils";
+          break;
+        case 10:
+          units = "Yards";
+          break;
+        case 11:
+          units = "Angstroms";
+          break;
+        case 12:
+          units = "Nanometers";
+          break;
+        case 13:
+          units = "Microns";
+          break;
+        case 14:
+          units = "Decimeters";
+          break;
+        case 15:
+          units = "Decameters";
+          break;
+        case 16:
+          units = "Hectometers";
+          break;
+        case 17:
+          units = "Gigameters";
+          break;
+        case 18:
+          units = "Astronomical Units";
+          break;
+        case 19:
+          units = "Light Years";
+          break;
+        case 20:
+          units = "Parsecs";
+          break;
+        default:
+          units = `INSUNITS Code ${insunits}`;
+      }
+    } else {
+      // Fallback to $LUNITS (coordinate display format)
+      const lunits = dxfData.header.$LUNITS as number;
+      if (lunits !== undefined) {
+        switch (lunits) {
+          case 1:
+            units = "Scientific Format";
+            break;
+          case 2:
+            units = "Decimal Format";
+            break;
+          case 3:
+            units = "Engineering Format";
+            break;
+          case 4:
+            units = "Architectural Format";
+            break;
+          case 5:
+            units = "Fractional Format";
+            break;
+          case 6:
+            units = "Architectural Format";
+            break;
+          case 7:
+            units = "Fractional Format";
+            break;
+          default:
+            units = `LUNITS Code ${lunits}`;
+        }
+      }
+    }
+
+    // Get $LUNITS for display format information
     const lunits = dxfData.header.$LUNITS as number;
-    switch (lunits) {
-      case 1:
-        units = "Scientific";
-        break;
-      case 2:
-        units = "Decimal";
-        break;
-      case 3:
-        units = "Engineering";
-        break;
-      case 4:
-        units = "Architectural";
-        break;
-      case 5:
-        units = "Fractional";
-        break;
-      default:
-        units = `Code ${lunits}`;
+    if (lunits !== undefined) {
+      switch (lunits) {
+        case 1:
+          unitsFormat = "Scientific";
+          break;
+        case 2:
+          unitsFormat = "Decimal";
+          break;
+        case 3:
+          unitsFormat = "Engineering";
+          break;
+        case 4:
+          unitsFormat = "Architectural";
+          break;
+        case 5:
+          unitsFormat = "Fractional";
+          break;
+        case 6:
+          unitsFormat = "Architectural";
+          break;
+        case 7:
+          unitsFormat = "Fractional";
+          break;
+        default:
+          unitsFormat = `Code ${lunits}`;
+      }
+    }
+
+    // Get $MEASUREMENT (English vs Metric flag)
+    const measurementFlag = dxfData.header.$MEASUREMENT as number;
+    if (measurementFlag !== undefined) {
+      measurement = measurementFlag === 0 ? "English" : "Metric";
     }
   }
 
   // Update stats
   stats["DXF_UNITS"] = units;
-  stats["GRID_SIZE"] = 1000; // From DxfViewer.tsx GRID_SIZE constant
+  stats["DXF_UNITS_FORMAT"] = unitsFormat;
+  stats["DXF_MEASUREMENT"] = measurement;
+  stats["GRID_SIZE"] = 100; // From DxfViewer.tsx GRID_SIZE constant
   stats["GRID_DIVISIONS"] = 100; // Grid divisions (hardcoded for CAD-style grid)
-  stats["GRID_UNIT_SIZE"] = 10; // 1000 / 100 = 10 units per division
+  stats["GRID_UNIT_SIZE"] = 1; // 100 / 100 = 1 unit per division (1:1 ratio)
 
   if (outerLoops.length > 0 || holes.length > 0) {
     stats["TOTAL_CLOSED_LOOPS"] = outerLoops.length + holes.length;
