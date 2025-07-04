@@ -1765,7 +1765,7 @@ export function processDxf(
   // Update stats
   stats["DXF_UNITS"] = units;
   stats["GRID_SIZE"] = 1000; // From DxfViewer.tsx GRID_SIZE constant
-  stats["GRID_DIVISIONS"] = 100; // From DxfViewer.tsx GRID_DIVISIONS constant
+  stats["GRID_DIVISIONS"] = 100; // Grid divisions (hardcoded for CAD-style grid)
   stats["GRID_UNIT_SIZE"] = 10; // 1000 / 100 = 10 units per division
 
   if (outerLoops.length > 0 || holes.length > 0) {

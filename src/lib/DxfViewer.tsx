@@ -18,7 +18,7 @@ import { DxfAnalyzer } from "./utils/DxfAnalyzer";
 
 // Reusable constants and geometries
 const GRID_SIZE = 1000;
-const GRID_DIVISIONS = 100;
+
 const AXES_SIZE = 500;
 
 // Error handling functions
@@ -196,7 +196,6 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
       showAxes,
       group,
       gridSize: GRID_SIZE,
-      gridDivisions: GRID_DIVISIONS,
       axesSize: AXES_SIZE,
     });
 
