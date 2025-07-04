@@ -132,7 +132,7 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
   );
 
   // Process DXF content
-  const { group, stats, entities, parseError } = useMemo(() => {
+  const { group, stats, entities, parseError, dxfHeader } = useMemo(() => {
     const startTime = performance.now();
     console.log("🚀 Starting DXF processing...");
 
@@ -465,8 +465,9 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
         count,
       })),
       closedLoops: DxfAnalyzer.findClosedLoops({ entities }),
+      dxfHeader,
     };
-  }, [dxfContent, entities, stats]);
+  }, [dxfContent, entities, stats, dxfHeader]);
 
   return (
     <div style={{ width, height, position: "relative" }}>
@@ -567,6 +568,37 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
             boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
           }}
         >
+          {/* File & Grid Information Section */}
+          {(showDebug || showDebugInfo) && (
+            <div style={{ marginBottom: "1rem" }}>
+              <div
+                style={{
+                  borderBottom: "1px solid rgba(255,255,255,0.3)",
+                  paddingBottom: "0.5rem",
+                  marginBottom: "0.5rem",
+                  fontWeight: "bold",
+                }}
+              >
+                File & Grid Information
+              </div>
+              <div style={{ fontSize: "0.8rem" }}>
+                <div style={{ marginBottom: "0.25rem" }}>
+                  <strong>DXF Units:</strong> {stats.DXF_UNITS || "Unknown"}
+                </div>
+                <div style={{ marginBottom: "0.25rem" }}>
+                  <strong>Grid Size:</strong> {stats.GRID_SIZE} units
+                </div>
+                <div style={{ marginBottom: "0.25rem" }}>
+                  <strong>Grid Divisions:</strong> {stats.GRID_DIVISIONS}
+                </div>
+                <div style={{ marginBottom: "0.25rem" }}>
+                  <strong>Grid Unit Size:</strong> {stats.GRID_UNIT_SIZE}{" "}
+                  units/division
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Entity Statistics Section */}
           {(showDebug || showDebugInfo) && analyzedData && (
             <>

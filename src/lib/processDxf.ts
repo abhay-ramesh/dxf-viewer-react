@@ -165,6 +165,7 @@ export interface ProcessDxfResult {
   stats: Record<string, number | string>;
   entities: IEntity[];
   parseError: Error | null;
+  dxfHeader?: Record<string, unknown>;
 }
 
 // Generate random contrasting colors
@@ -1448,14 +1449,24 @@ export function processDxf(
   // Parse DXF
   const parseStartTime = performance.now();
   let entities: IEntity[] = [];
+  let dxfData: {
+    entities?: IEntity[];
+    header?: Record<string, unknown>;
+  } | null = null;
   let parseError: Error | null = null;
   try {
-    const dxf = new DxfParser().parseSync(dxfContent);
-    entities = dxf?.entities || [];
+    dxfData = new DxfParser().parseSync(dxfContent);
+    entities = dxfData?.entities || [];
   } catch (error) {
     parseError =
       error instanceof Error ? error : new Error("Failed to parse DXF");
-    return { group: new THREE.Group(), stats: {}, entities: [], parseError };
+    return {
+      group: new THREE.Group(),
+      stats: {},
+      entities: [],
+      parseError,
+      dxfHeader: undefined,
+    };
   }
   const parseEndTime = performance.now();
   console.log(
@@ -1669,8 +1680,8 @@ export function processDxf(
             ),
           };
 
-          // Slightly offset behind the lines to avoid z-fighting
-          shapeMesh.position.z = -0.001;
+          // Slightly offset above the grid to be visible
+          shapeMesh.position.z = 0.001;
 
           objects.push(shapeMesh);
         }
@@ -1696,7 +1707,7 @@ export function processDxf(
               fallbackGeometry,
               fallbackMaterial
             );
-            fallbackMesh.position.z = -0.001;
+            fallbackMesh.position.z = 0.001;
             objects.push(fallbackMesh);
           }
         } catch (fallbackError) {
@@ -1714,9 +1725,49 @@ export function processDxf(
   // Create group and add objects
   const group = new THREE.Group();
   objects.forEach((obj) => group.add(obj));
+
+  // Calculate the center of the DXF content to position it at origin
+  const box = new THREE.Box3().setFromObject(group);
+  if (!box.isEmpty()) {
+    const center = box.getCenter(new THREE.Vector3());
+    // Translate the group so its center is at (0, 0, 0) - the grid center
+    // Keep z at 0 so DXF content appears on top of the grid
+    group.position.set(-center.x, -center.y, 0);
+  }
+
   geometryCache.clear();
 
+  // Extract DXF header information for units
+  let units = "Unknown";
+  if (dxfData?.header) {
+    const lunits = dxfData.header.$LUNITS as number;
+    switch (lunits) {
+      case 1:
+        units = "Scientific";
+        break;
+      case 2:
+        units = "Decimal";
+        break;
+      case 3:
+        units = "Engineering";
+        break;
+      case 4:
+        units = "Architectural";
+        break;
+      case 5:
+        units = "Fractional";
+        break;
+      default:
+        units = `Code ${lunits}`;
+    }
+  }
+
   // Update stats
+  stats["DXF_UNITS"] = units;
+  stats["GRID_SIZE"] = 1000; // From DxfViewer.tsx GRID_SIZE constant
+  stats["GRID_DIVISIONS"] = 100; // From DxfViewer.tsx GRID_DIVISIONS constant
+  stats["GRID_UNIT_SIZE"] = 10; // 1000 / 100 = 10 units per division
+
   if (outerLoops.length > 0 || holes.length > 0) {
     stats["TOTAL_CLOSED_LOOPS"] = outerLoops.length + holes.length;
     if (showShapeColors) {
@@ -1741,5 +1792,5 @@ export function processDxf(
     `⏱️ TOTAL processDxf took: ${(totalEndTime - totalStartTime).toFixed(2)}ms`
   );
 
-  return { group, stats, entities, parseError };
+  return { group, stats, entities, parseError, dxfHeader: dxfData?.header };
 }

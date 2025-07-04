@@ -32,11 +32,15 @@ export function setupScene({
     );
     // Rotate grid to XY plane (default is XZ)
     grid.rotation.x = Math.PI / 2;
+    // Position grid slightly below DXF content so DXF appears on top
+    grid.position.z = -0.01;
     scene.add(grid);
   }
 
   if (showAxes) {
     const axesHelper = new THREE.AxesHelper(axesSize);
+    // Position axes slightly above grid but below DXF content
+    axesHelper.position.z = -0.005;
     scene.add(axesHelper);
   }
 

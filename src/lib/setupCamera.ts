@@ -62,9 +62,10 @@ export function setupCamera({
     10000
   );
 
-  // Position camera directly above the content looking down (for true 2D view)
-  camera.position.set(center.x, center.y, center.z + distance);
-  camera.lookAt(center);
+  // Position camera directly above the grid center looking down (for true 2D view)
+  // Since DXF content is now centered at origin (0,0,0), look at origin
+  camera.position.set(0, 0, distance);
+  camera.lookAt(0, 0, 0);
 
-  return { camera, center };
+  return { camera, center: new THREE.Vector3(0, 0, 0) };
 }
