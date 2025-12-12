@@ -2,6 +2,16 @@ import { IEntity } from "dxf-parser";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
+export interface EntityInfo {
+  type: string;
+  length?: number;
+  radius?: number;
+  center?: THREE.Vector3;
+  startPoint?: THREE.Vector3;
+  endPoint?: THREE.Vector3;
+  vertices?: number;
+}
+
 export interface DxfViewerProps {
   /** The DXF file content as a string */
   dxfContent: string | null;
@@ -75,6 +85,8 @@ export interface ICircleEntity extends IEntity {
   type: "CIRCLE";
   center: { x: number; y: number; z: number };
   radius: number;
+  startAngle: number;
+  endAngle: number;
 }
 
 export interface IPolylineEntity extends IEntity {
