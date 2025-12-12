@@ -4,7 +4,6 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 export function setupControls(
   camera: THREE.OrthographicCamera,
   renderer: THREE.WebGLRenderer,
-  group: THREE.Group,
   center: THREE.Vector3
 ) {
   const controls = new OrbitControls(camera, renderer.domElement);

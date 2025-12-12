@@ -182,8 +182,8 @@ export const DxfViewer: React.FC<DxfViewerProps> = ({
   // Controls setup - memoized to avoid recreation
   const controls = useMemo(() => {
     if (!camera || !renderer) return null;
-    return setupControls(camera, renderer, group, center);
-  }, [camera, renderer, group, center]);
+    return setupControls(camera, renderer, center);
+  }, [camera, renderer, center]);
 
   // Animation frame handler - no change needed, already optimized
   const animate = useCallback(() => {

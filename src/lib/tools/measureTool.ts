@@ -63,7 +63,7 @@ export class MeasureTool implements Tool {
   activate({ controls, scene }: ToolContext) {
     controls.enablePan = false;
     controls.enableRotate = false;
-    controls.mouseButtons.LEFT = -1;
+    controls.mouseButtons.LEFT = null;
 
     // Add visual elements to scene
     if (this.snapIndicator) scene.add(this.snapIndicator);
@@ -81,7 +81,7 @@ export class MeasureTool implements Tool {
 
   deactivate({ controls, scene }: ToolContext) {
     controls.enablePan = false;
-    controls.mouseButtons.LEFT = -1;
+    controls.mouseButtons.LEFT = null;
 
     // Clean up
     this.clearMeasurement(scene);
@@ -185,42 +185,42 @@ export class MeasureTool implements Tool {
     return nearestPoint;
   }
 
-  private createMeasurementText(
-    distance: number,
-    midPoint: THREE.Vector3
-  ): THREE.Sprite {
-    const canvas = document.createElement("canvas");
-    const context = canvas.getContext("2d")!;
-    canvas.width = 128;
-    canvas.height = 32;
+  // private createMeasurementText(
+  //   distance: number,
+  //   midPoint: THREE.Vector3
+  // ): THREE.Sprite {
+  //   const canvas = document.createElement("canvas");
+  //   const context = canvas.getContext("2d")!;
+  //   canvas.width = 128;
+  //   canvas.height = 32;
 
-    // Draw text
-    context.fillStyle = "rgba(0, 0, 0, 0.8)";
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    context.font = "bold 16px Arial";
-    context.fillStyle = "white";
-    context.textAlign = "center";
-    context.textBaseline = "middle";
-    context.fillText(
-      `${distance.toFixed(2)} units`,
-      canvas.width / 2,
-      canvas.height / 2
-    );
+  //   // Draw text
+  //   context.fillStyle = "rgba(0, 0, 0, 0.8)";
+  //   context.fillRect(0, 0, canvas.width, canvas.height);
+  //   context.font = "bold 16px Arial";
+  //   context.fillStyle = "white";
+  //   context.textAlign = "center";
+  //   context.textBaseline = "middle";
+  //   context.fillText(
+  //     `${distance.toFixed(2)} units`,
+  //     canvas.width / 2,
+  //     canvas.height / 2
+  //   );
 
-    // Create sprite
-    const texture = new THREE.CanvasTexture(canvas);
-    const spriteMaterial = new THREE.SpriteMaterial({
-      map: texture,
-      depthTest: false,
-      sizeAttenuation: false,
-    });
-    const sprite = new THREE.Sprite(spriteMaterial);
-    sprite.position.copy(midPoint);
-    sprite.scale.set(1, 0.25, 1);
-    sprite.renderOrder = 1000;
+  //   // Create sprite
+  //   const texture = new THREE.CanvasTexture(canvas);
+  //   const spriteMaterial = new THREE.SpriteMaterial({
+  //     map: texture,
+  //     depthTest: false,
+  //     sizeAttenuation: false,
+  //   });
+  //   const sprite = new THREE.Sprite(spriteMaterial);
+  //   sprite.position.copy(midPoint);
+  //   sprite.scale.set(1, 0.25, 1);
+  //   sprite.renderOrder = 1000;
 
-    return sprite;
-  }
+  //   return sprite;
+  // }
 
   private snapPoints: THREE.Mesh[] = [];
   private snapPointMaterial = new THREE.MeshBasicMaterial({

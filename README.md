@@ -1,50 +1,90 @@
-# React + TypeScript + Vite
+# dxf-viewer-react
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A React component library for viewing DXF (Drawing Exchange Format) files using Three.js.
 
-Currently, two official plugins are available:
+![License](https://img.shields.io/npm/l/dxf-viewer-react)
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Features
 
-## Expanding the ESLint configuration
+- 🚀 **Fast Rendering**: Powered by Three.js for efficient 2D/3D visualization
+- 🛠️ **Interactive Tools**: Built-in support for Panning, Zooming, Selecting, and Measuring
+- 📏 **Measurement**: Accurate distance measurements with snapping
+- 🎨 **Layer Support**: (Coming soon) Toggle visibility of DXF layers
+- 📱 **Responsive**: Adapts to container size
 
-If you are developing a production application, we recommend updating the configuration to enable type aware lint rules:
+## Installation
 
-- Configure the top-level `parserOptions` property like this:
-
-```js
-export default tseslint.config({
-  languageOptions: {
-    // other options...
-    parserOptions: {
-      project: ['./tsconfig.node.json', './tsconfig.app.json'],
-      tsconfigRootDir: import.meta.dirname,
-    },
-  },
-})
+```bash
+npm install dxf-viewer-react three
+# or
+pnpm add dxf-viewer-react three
+# or
+yarn add dxf-viewer-react three
 ```
 
-- Replace `tseslint.configs.recommended` to `tseslint.configs.recommendedTypeChecked` or `tseslint.configs.strictTypeChecked`
-- Optionally add `...tseslint.configs.stylisticTypeChecked`
-- Install [eslint-plugin-react](https://github.com/jsx-eslint/eslint-plugin-react) and update the config:
+> **Note**: `three` is a peer dependency and must be installed alongside this library.
 
-```js
-// eslint.config.js
-import react from 'eslint-plugin-react'
+## Usage
 
-export default tseslint.config({
-  // Set the react version
-  settings: { react: { version: '18.3' } },
-  plugins: {
-    // Add the react plugin
-    react,
-  },
-  rules: {
-    // other rules...
-    // Enable its recommended rules
-    ...react.configs.recommended.rules,
-    ...react.configs['jsx-runtime'].rules,
-  },
-})
+```tsx
+import { useState, useEffect } from 'react';
+import { DxfViewer } from 'dxf-viewer-react';
+
+function App() {
+  const [dxfContent, setDxfContent] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Load your DXF file content (e.g., via fetch or file input)
+    fetch('/path/to/your/file.dxf')
+      .then(res => res.text())
+      .then(text => setDxfContent(text));
+  }, []);
+
+  if (!dxfContent) return <div>Loading...</div>;
+
+  return (
+    <div style={{ width: '100vw', height: '100vh' }}>
+      <DxfViewer 
+        dxfContent={dxfContent}
+        width="100%"
+        height="100%"
+        backgroundColor={0xf0f0f0}
+        entityColor={0x0000ff}
+        showGrid={true}
+        showAxes={true}
+        onLoad={(stats) => console.log('DXF Loaded:', stats)}
+        onError={(err) => console.error('Error loading DXF:', err)}
+      />
+    </div>
+  );
+}
 ```
+
+## Props
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `dxfContent` | `string` | **Required** | The raw string content of the DXF file. |
+| `width` | `string \| number` | `"100%"` | Width of the viewer container. |
+| `height` | `string \| number` | `"100%"` | Height of the viewer container. |
+| `backgroundColor` | `number` | `0xf0f0f0` | Hex color code for the background scene. |
+| `entityColor` | `number` | `0x0000ff` | Hex color code for the DXF lines/entities. |
+| `showGrid` | `boolean` | `true` | Whether to show the background grid. |
+| `showAxes` | `boolean` | `true` | Whether to show the X/Y axes helper. |
+| `showDebugInfo` | `boolean` | `false` | Show overlay with debug/stats information. |
+| `showShapeColors` | `boolean` | `true` | Attempt to fill closed shapes with colors. |
+| `defaultTool` | `"pan" \| "select" \| "measure"` | `"pan"` | The tool active by default on load. |
+| `onLoad` | `(stats: any) => void` | `undefined` | Callback fired when DXF is successfully parsed and loaded. |
+| `onError` | `(error: Error) => void` | `undefined` | Callback fired when DXF parsing fails. |
+| `onMeasureComplete` | `(dist: number, p1: Vector3, p2: Vector3) => void` | `undefined` | Callback fired after a measurement is completed. |
+
+## Development
+
+1. Clone the repository
+2. Install dependencies: `pnpm install`
+3. Run dev server: `pnpm dev`
+4. Build library: `pnpm build:lib`
+
+## License
+
+MIT

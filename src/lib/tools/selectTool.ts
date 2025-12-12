@@ -41,12 +41,12 @@ export class SelectTool implements Tool {
   activate({ controls }: ToolContext) {
     controls.enablePan = false;
     controls.enableRotate = false;
-    controls.mouseButtons.LEFT = -1; // No action
+    controls.mouseButtons.LEFT = null; // No action
   }
 
   deactivate({ controls }: ToolContext) {
     controls.enablePan = false;
-    controls.mouseButtons.LEFT = -1;
+    controls.mouseButtons.LEFT = null;
 
     // Clear any selection
     this.clearSelection();

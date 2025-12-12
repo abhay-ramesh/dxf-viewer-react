@@ -12,7 +12,7 @@ export class PanTool implements Tool {
 
   deactivate({ controls }: ToolContext) {
     controls.enablePan = false;
-    controls.mouseButtons.LEFT = -1; // No action
+    controls.mouseButtons.LEFT = null; // No action
     controls.touches.ONE = 0; // No action
   }
 }
