@@ -42,7 +42,7 @@ export const useDxfViewer = ({
     width: number;
     height: number;
   } | null>(null);
-  
+
   const [currentTool, setCurrentTool] = useState<"pan" | "select" | "measure">(
     defaultTool
   );
@@ -104,7 +104,13 @@ export const useDxfViewer = ({
   );
 
   // Process DXF
-  const { group, stats: processedStats, entities, parseError, dxfHeader } = useMemo(() => {
+  const {
+    group,
+    stats: processedStats,
+    entities,
+    parseError,
+    dxfHeader,
+  } = useMemo(() => {
     return processDxf(dxfContent || "", material, showShapeColors);
   }, [dxfContent, material, showShapeColors]);
 
@@ -112,33 +118,39 @@ export const useDxfViewer = ({
   useEffect(() => {
     setStats(processedStats);
     if (parseError) {
-        setError(parseError instanceof Error ? parseError.message : "Failed to parse DXF");
-        onError?.(parseError instanceof Error ? parseError : new Error("Failed to parse DXF"));
+      setError(
+        parseError instanceof Error ? parseError.message : "Failed to parse DXF"
+      );
+      onError?.(
+        parseError instanceof Error
+          ? parseError
+          : new Error("Failed to parse DXF")
+      );
     } else {
-        setError(null);
+      setError(null);
     }
   }, [processedStats, parseError, onError]);
 
   // Analyze Data
   useEffect(() => {
     if (dxfContent && entities) {
-        setAnalyzedData({
-            totalEntities: entities.length,
-            entityTypes: Object.entries(processedStats).map(([type, count]) => ({
-                type,
-                count,
-            })),
-            closedLoops: DxfAnalyzer.findClosedLoops({ entities }),
-            dxfHeader,
-        });
-        setIsLoaded(true);
+      setAnalyzedData({
+        totalEntities: entities.length,
+        entityTypes: Object.entries(processedStats).map(([type, count]) => ({
+          type,
+          count,
+        })),
+        closedLoops: DxfAnalyzer.findClosedLoops({ entities }),
+        dxfHeader,
+      });
+      setIsLoaded(true);
     }
   }, [dxfContent, entities, processedStats, dxfHeader]);
 
-
   // Setup Three.js
   const { camera, center } = useMemo(() => {
-    if (!containerDimensions) return { camera: null, center: new THREE.Vector3() };
+    if (!containerDimensions)
+      return { camera: null, center: new THREE.Vector3() };
     return setupCamera({
       containerWidth: containerDimensions.width,
       containerHeight: containerDimensions.height,
@@ -176,27 +188,34 @@ export const useDxfViewer = ({
 
   // Animation Loop
   const animate = useCallback(() => {
-    if (!cameraRef.current || !rendererRef.current || !sceneRef.current || !controlsRef.current) return;
+    if (
+      !cameraRef.current ||
+      !rendererRef.current ||
+      !sceneRef.current ||
+      !controlsRef.current
+    )
+      return;
     animationFrameRef.current = requestAnimationFrame(animate);
     controlsRef.current.update();
     rendererRef.current.render(sceneRef.current, cameraRef.current);
   }, []);
 
   const handleResize = useCallback(() => {
-     if (!containerRef.current || !rendererRef.current || !cameraRef.current) return;
-     const width = containerRef.current.clientWidth;
-     const height = containerRef.current.clientHeight;
-     const camera = cameraRef.current;
-     
-     const aspect = width / height;
-     const currentHeight = camera.top - camera.bottom;
-     const newWidth = currentHeight * aspect;
-     const centerX = (camera.left + camera.right) / 2;
-     
-     camera.left = centerX - newWidth / 2;
-     camera.right = centerX + newWidth / 2;
-     camera.updateProjectionMatrix();
-     rendererRef.current.setSize(width, height);
+    if (!containerRef.current || !rendererRef.current || !cameraRef.current)
+      return;
+    const width = containerRef.current.clientWidth;
+    const height = containerRef.current.clientHeight;
+    const camera = cameraRef.current;
+
+    const aspect = width / height;
+    const currentHeight = camera.top - camera.bottom;
+    const newWidth = currentHeight * aspect;
+    const centerX = (camera.left + camera.right) / 2;
+
+    camera.left = centerX - newWidth / 2;
+    camera.right = centerX + newWidth / 2;
+    camera.updateProjectionMatrix();
+    rendererRef.current.setSize(width, height);
   }, []);
 
   // Tools Setup
@@ -220,7 +239,7 @@ export const useDxfViewer = ({
     const toolContext = { scene, camera, renderer, controls, group };
 
     activeTool?.deactivate(toolContext);
-    
+
     const newTool = tools[currentTool];
     newTool.activate(toolContext);
     setActiveTool(newTool);
@@ -228,42 +247,71 @@ export const useDxfViewer = ({
     return () => newTool.deactivate(toolContext);
   }, [currentTool, scene, camera, renderer, controls, group, tools]);
 
-
   // Event Listeners
-  const handleMouseDown = useCallback((event: MouseEvent) => {
-      if (!scene || !camera || !renderer || !controls || !group || !activeTool) return;
-      activeTool.onMouseDown?.(event, { scene, camera, renderer, controls, group });
-  }, [scene, camera, renderer, controls, group, activeTool]);
+  const handleMouseDown = useCallback(
+    (event: MouseEvent) => {
+      if (!scene || !camera || !renderer || !controls || !group || !activeTool)
+        return;
+      activeTool.onMouseDown?.(event, {
+        scene,
+        camera,
+        renderer,
+        controls,
+        group,
+      });
+    },
+    [scene, camera, renderer, controls, group, activeTool]
+  );
 
-  const handleMouseMove = useCallback((event: MouseEvent) => {
-      if (!scene || !camera || !renderer || !controls || !group || !activeTool) return;
-      activeTool.onMouseMove?.(event, { scene, camera, renderer, controls, group });
-  }, [scene, camera, renderer, controls, group, activeTool]);
+  const handleMouseMove = useCallback(
+    (event: MouseEvent) => {
+      if (!scene || !camera || !renderer || !controls || !group || !activeTool)
+        return;
+      activeTool.onMouseMove?.(event, {
+        scene,
+        camera,
+        renderer,
+        controls,
+        group,
+      });
+    },
+    [scene, camera, renderer, controls, group, activeTool]
+  );
 
-  const handleMouseUp = useCallback((event: MouseEvent) => {
-      if (!scene || !camera || !renderer || !controls || !group || !activeTool) return;
-      activeTool.onMouseUp?.(event, { scene, camera, renderer, controls, group });
-  }, [scene, camera, renderer, controls, group, activeTool]);
-
+  const handleMouseUp = useCallback(
+    (event: MouseEvent) => {
+      if (!scene || !camera || !renderer || !controls || !group || !activeTool)
+        return;
+      activeTool.onMouseUp?.(event, {
+        scene,
+        camera,
+        renderer,
+        controls,
+        group,
+      });
+    },
+    [scene, camera, renderer, controls, group, activeTool]
+  );
 
   useEffect(() => {
-      const canvas = renderer?.domElement;
-      if (!canvas) return;
-      canvas.addEventListener("mousedown", handleMouseDown);
-      canvas.addEventListener("mousemove", handleMouseMove);
-      canvas.addEventListener("mouseup", handleMouseUp);
-      return () => {
-          canvas.removeEventListener("mousedown", handleMouseDown);
-          canvas.removeEventListener("mousemove", handleMouseMove);
-          canvas.removeEventListener("mouseup", handleMouseUp);
-      };
+    const canvas = renderer?.domElement;
+    if (!canvas) return;
+    canvas.addEventListener("mousedown", handleMouseDown);
+    canvas.addEventListener("mousemove", handleMouseMove);
+    canvas.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      canvas.removeEventListener("mousedown", handleMouseDown);
+      canvas.removeEventListener("mousemove", handleMouseMove);
+      canvas.removeEventListener("mouseup", handleMouseUp);
+    };
   }, [renderer, handleMouseDown, handleMouseMove, handleMouseUp]);
 
   // Init Effect
   useEffect(() => {
-    if (!containerRef.current || !camera || !renderer || !controls || !scene) return;
+    if (!containerRef.current || !camera || !renderer || !controls || !scene)
+      return;
     const container = containerRef.current;
-    
+
     rendererRef.current = renderer;
     sceneRef.current = scene;
     cameraRef.current = camera;
@@ -274,7 +322,7 @@ export const useDxfViewer = ({
     window.addEventListener("resize", handleResize);
 
     if (onLoad && isLoaded) {
-       // Filter stats to only include numeric values
+      // Filter stats to only include numeric values
       const numericStats: Record<string, number> = {};
       Object.entries(processedStats).forEach(([key, value]) => {
         if (typeof value === "number") {
@@ -285,16 +333,30 @@ export const useDxfViewer = ({
     }
 
     return () => {
-        window.removeEventListener("resize", handleResize);
-        if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
-        renderer.dispose();
-        material.dispose();
-        group.traverse((obj) => {
-            if (obj instanceof THREE.Line) obj.geometry.dispose();
-        });
-        if (container.contains(renderer.domElement)) container.removeChild(renderer.domElement);
+      window.removeEventListener("resize", handleResize);
+      if (animationFrameRef.current)
+        cancelAnimationFrame(animationFrameRef.current);
+      renderer.dispose();
+      material.dispose();
+      group.traverse((obj) => {
+        if (obj instanceof THREE.Line) obj.geometry.dispose();
+      });
+      if (container.contains(renderer.domElement))
+        container.removeChild(renderer.domElement);
     };
-  }, [camera, renderer, controls, scene, animate, handleResize, material, group, onLoad, isLoaded, processedStats]);
+  }, [
+    camera,
+    renderer,
+    controls,
+    scene,
+    animate,
+    handleResize,
+    material,
+    group,
+    onLoad,
+    isLoaded,
+    processedStats,
+  ]);
 
   return {
     containerRef,
@@ -305,7 +367,13 @@ export const useDxfViewer = ({
     measureText,
     stats,
     analyzedData,
-    error
+    error,
+    // Expose internal instances for extension
+    scene: sceneRef.current,
+    camera: cameraRef.current,
+    renderer: rendererRef.current,
+    controls: controlsRef.current,
+    dxfEntities: entities,
+    dxfGroup: group,
   };
 };
-
