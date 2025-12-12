@@ -1,66 +1,14 @@
 {
-  "name": "dxf-viewer-react",
-  "version": "0.1.0",
-  "description": "A React component library for viewing DXF files with Three.js",
-  "type": "module",
-  "main": "./dist/dxf-viewer-react.umd.js",
-  "module": "./dist/dxf-viewer-react.es.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "import": "./dist/dxf-viewer-react.es.js",
-      "require": "./dist/dxf-viewer-react.umd.js",
-      "types": "./dist/index.d.ts"
-    }
-  },
-  "files": [
-    "dist",
-    "README.md"
-  ],
+  "name": "dxf-viewer-monorepo",
+  "private": true,
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
-    "build:lib": "vite build -c vite.lib.config.ts",
-    "lint": "eslint .",
-    "preview": "vite preview",
-    "prepublishOnly": "pnpm build:lib"
-  },
-  "peerDependencies": {
-    "react": "^18.0.0",
-    "react-dom": "^18.0.0",
-    "three": "^0.160.0"
-  },
-  "dependencies": {
-    "dxf-parser": "^1.1.2"
+    "dev": "pnpm -r --parallel dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint"
   },
   "devDependencies": {
-    "@eslint/js": "^9.17.0",
-    "@types/node": "^25.0.1",
-    "@types/react": "^18.3.18",
-    "@types/react-dom": "^18.3.5",
-    "@types/three": "^0.160.0",
-    "@vitejs/plugin-react": "^4.3.4",
-    "eslint": "^9.17.0",
-    "eslint-plugin-react-hooks": "^5.0.0",
-    "eslint-plugin-react-refresh": "^0.4.16",
-    "globals": "^15.14.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "three": "^0.160.0",
-    "typescript": "~5.6.2",
-    "typescript-eslint": "^8.18.2",
-    "vite": "^6.0.5",
-    "vite-plugin-dts": "^4.5.4"
+    "typescript": "^5.6.2",
+    "vite": "^6.0.5"
   },
-  "keywords": [
-    "dxf",
-    "viewer",
-    "react",
-    "three.js",
-    "cad",
-    "autocad"
-  ],
-  "author": "",
-  "license": "MIT",
   "packageManager": "pnpm@10.18.3+sha512.bbd16e6d7286fd7e01f6b3c0b3c932cda2965c06a908328f74663f10a9aea51f1129eea615134bf992831b009eabe167ecb7008b597f40ff9bc75946aadfb08d"
 }

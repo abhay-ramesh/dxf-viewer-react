@@ -22,7 +22,15 @@ export const DxfViewer: React.FC<DxfViewerProps> = (props) => {
   } = props;
 
   return (
-    <div style={{ width, height, position: "relative" }}>
+    <div
+      style={{
+        width,
+        height,
+        position: "relative",
+        overflow: "hidden",
+        backgroundColor: "#f0f0f0",
+      }}
+    >
       <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
 
       {/* Tool buttons */}
@@ -57,7 +65,7 @@ export const DxfViewer: React.FC<DxfViewerProps> = (props) => {
             gap: "0.375rem",
           }}
         >
-          ⭐ Pan
+          Pan
         </button>
         <button
           onClick={() => setCurrentTool("select")}
@@ -76,7 +84,7 @@ export const DxfViewer: React.FC<DxfViewerProps> = (props) => {
             gap: "0.375rem",
           }}
         >
-          🎯 Select
+          Select
         </button>
         <button
           onClick={() => setCurrentTool("measure")}
@@ -95,7 +103,7 @@ export const DxfViewer: React.FC<DxfViewerProps> = (props) => {
             gap: "0.375rem",
           }}
         >
-          📏 Measure
+          Measure
         </button>
       </div>
 
@@ -124,7 +132,6 @@ export const DxfViewer: React.FC<DxfViewerProps> = (props) => {
             gap: "0.5rem",
           }}
         >
-          <span>📏</span>
           {measureText}
         </div>
       )}
@@ -164,25 +171,17 @@ export const DxfViewer: React.FC<DxfViewerProps> = (props) => {
                   color: "#0066cc",
                 }}
               >
-                📋 File & Grid Information
+                File Info
               </div>
               <div style={{ fontSize: "0.8rem" }}>
                 <div>
-                  <strong>Drawing Units:</strong> {stats.DXF_UNITS || "Unknown"}
+                  <strong>Units:</strong> {stats.DXF_UNITS || "Unknown"}
                 </div>
                 {stats.DXF_UNITS_FORMAT && (
                   <div>
-                    <strong>Units Format:</strong> {stats.DXF_UNITS_FORMAT}
+                    <strong>Format:</strong> {stats.DXF_UNITS_FORMAT}
                   </div>
                 )}
-                {stats.DXF_MEASUREMENT && (
-                  <div>
-                    <strong>Measurement System:</strong> {stats.DXF_MEASUREMENT}
-                  </div>
-                )}
-                <div>
-                  <strong>Grid Size:</strong> {stats.GRID_SIZE} units
-                </div>
               </div>
             </div>
           )}
@@ -199,12 +198,15 @@ export const DxfViewer: React.FC<DxfViewerProps> = (props) => {
                   color: "#0066cc",
                 }}
               >
-                🎯 Selected Entity
+                Selection
               </div>
               <div style={{ paddingLeft: "0.5rem" }}>
                 <div>Type: {selectedEntityInfo.type}</div>
                 {selectedEntityInfo.length !== undefined && (
                   <div>Length: {selectedEntityInfo.length.toFixed(2)}</div>
+                )}
+                {selectedEntityInfo.radius !== undefined && (
+                  <div>Radius: {selectedEntityInfo.radius.toFixed(2)}</div>
                 )}
               </div>
             </div>
@@ -243,6 +245,7 @@ export const DxfViewer: React.FC<DxfViewerProps> = (props) => {
             background: "red",
             color: "white",
             padding: "1rem",
+            borderRadius: "8px",
           }}
         >
           {error}

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { DxfViewer } from "../lib";
+import { DxfViewer } from "dxf-viewer-react";
 import "./App.css";
 
 function App() {
