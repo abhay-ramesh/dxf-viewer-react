@@ -164,6 +164,8 @@ export interface ProcessDxfResult {
   group: THREE.Group;
   stats: Record<string, number | string>;
   entities: IEntity[];
+  layers: Record<string, THREE.Group>;
+  layerTable: Record<string, { color: number }>;
   parseError: Error | null;
   dxfHeader?: Record<string, unknown>;
 }
@@ -1452,10 +1454,11 @@ export function processDxf(
   let dxfData: {
     entities?: IEntity[];
     header?: Record<string, unknown>;
+    tables?: { layer?: { layers?: Record<string, any> } };
   } | null = null;
   let parseError: Error | null = null;
   try {
-    dxfData = new DxfParser().parseSync(dxfContent);
+    dxfData = new DxfParser().parseSync(dxfContent) as any;
     entities = dxfData?.entities || [];
   } catch (error) {
     parseError =
@@ -1464,6 +1467,8 @@ export function processDxf(
       group: new THREE.Group(),
       stats: {},
       entities: [],
+      layers: {},
+      layerTable: {},
       parseError,
       dxfHeader: undefined,
     };
@@ -1544,6 +1549,38 @@ export function processDxf(
   console.log("🏗️ Starting entity processing...");
 
   const stats: Record<string, number | string> = {};
+  const layers: Record<string, THREE.Group> = {};
+  const layerTable: Record<string, { color: number }> = {};
+
+  // Initialize layers from DXF tables if available
+  if (dxfData?.tables?.layer?.layers) {
+    Object.values(dxfData.tables.layer.layers).forEach((layer: any) => {
+      const layerName = layer.name;
+      layers[layerName] = new THREE.Group();
+      layers[layerName].userData = { name: layerName };
+
+      // Parse layer color (AutoCAD color index)
+      let color = 0xffffff;
+      if (layer.color !== undefined) {
+        // Simple mapping for standard colors, full mapping would require a lookup table
+        // This is a simplified implementation
+        const colors = [
+          0x000000, 0xff0000, 0xffff00, 0x00ff00, 0x00ffff, 0x0000ff, 0xff00ff,
+          0xffffff, 0x808080, 0xc0c0c0,
+        ];
+        color = colors[Math.abs(layer.color) % colors.length] || 0xffffff;
+      }
+      layerTable[layerName] = { color };
+    });
+  }
+
+  // Ensure default layer 0 exists
+  if (!layers["0"]) {
+    layers["0"] = new THREE.Group();
+    layers["0"].userData = { name: "0" };
+    layerTable["0"] = { color: 0xffffff };
+  }
+
   const objects: THREE.Object3D[] = [];
   const geometryCache = new Map<string, THREE.BufferGeometry>();
 
@@ -1557,6 +1594,22 @@ export function processDxf(
           ? (stats[entity.type] as number)
           : 0;
       stats[entity.type] = currentCount + 1;
+
+      // Determine entity color
+      // If entity color is 256 (ByLayer), use layer color
+      // Otherwise use entity color (mapping needed) or default
+      // let entityColor =
+      //   material instanceof THREE.LineBasicMaterial
+      //     ? material.color.getHex()
+      //     : 0xffffff;
+
+      // Use layer color if entity doesn't specify one or specifies ByLayer (256)
+      // Note: This logic is simplified; a full implementation would check entity.color
+      const layerName = entity.layer || "0";
+      if (layerTable[layerName]) {
+        // Ideally we'd use the layer color here if we were creating materials per entity
+        // For now we're using the passed 'material' which is global
+      }
 
       const cacheKey = `${entity.type}-${JSON.stringify(entity)}`;
       let geometry = geometryCache.get(cacheKey);
@@ -1631,7 +1684,18 @@ export function processDxf(
         object.userData = {
           entityType: entity.type,
           isClosedLoop: closedLoopEntities.has(entity),
+          layer: entity.layer || "0",
         };
+
+        // Add to appropriate layer group
+        const layerName = entity.layer || "0";
+        if (!layers[layerName]) {
+          layers[layerName] = new THREE.Group();
+          layers[layerName].userData = { name: layerName };
+          layerTable[layerName] = { color: 0xffffff };
+        }
+        layers[layerName].add(object);
+
         objects.push(object);
       }
     } catch (err) {
@@ -1678,10 +1742,19 @@ export function processDxf(
               (sum, hole) => sum + hole.area,
               0
             ),
+            layer: shapeGroup.outerLoop.entities[0]?.layer || "0",
           };
 
           // Slightly offset above the grid to be visible
           shapeMesh.position.z = 0.001;
+
+          // Add to appropriate layer
+          const layerName = shapeMesh.userData.layer;
+          if (!layers[layerName]) {
+            layers[layerName] = new THREE.Group();
+            layers[layerName].userData = { name: layerName };
+          }
+          layers[layerName].add(shapeMesh);
 
           objects.push(shapeMesh);
         }
@@ -1708,6 +1781,17 @@ export function processDxf(
               fallbackMaterial
             );
             fallbackMesh.position.z = 0.001;
+            fallbackMesh.userData = {
+              layer: shapeGroup.outerLoop.entities[0]?.layer || "0",
+            };
+
+            const layerName = fallbackMesh.userData.layer;
+            if (!layers[layerName]) {
+              layers[layerName] = new THREE.Group();
+              layers[layerName].userData = { name: layerName };
+            }
+            layers[layerName].add(fallbackMesh);
+
             objects.push(fallbackMesh);
           }
         } catch (fallbackError) {
@@ -1722,9 +1806,9 @@ export function processDxf(
     // Skip shape creation when colors are disabled for better performance
   }
 
-  // Create group and add objects
+  // Create main group and add layer groups
   const group = new THREE.Group();
-  objects.forEach((obj) => group.add(obj));
+  Object.values(layers).forEach((layerGroup) => group.add(layerGroup));
 
   // Position the DXF content so its left bottom point is at the origin
   const box = new THREE.Box3().setFromObject(group);
@@ -1913,5 +1997,13 @@ export function processDxf(
     `⏱️ TOTAL processDxf took: ${(totalEndTime - totalStartTime).toFixed(2)}ms`
   );
 
-  return { group, stats, entities, parseError, dxfHeader: dxfData?.header };
+  return {
+    group,
+    stats,
+    entities,
+    parseError,
+    dxfHeader: dxfData?.header,
+    layers,
+    layerTable,
+  };
 }

@@ -12,6 +12,12 @@ export interface EntityInfo {
   vertices?: number;
 }
 
+export interface LayerInfo {
+  name: string;
+  color: number;
+  visible: boolean;
+}
+
 export interface DxfViewerProps {
   /** The DXF file content as a string */
   dxfContent: string | null;

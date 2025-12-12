@@ -13,7 +13,7 @@ import { setupCamera } from "./setupCamera";
 import { setupControls } from "./setupControls";
 import { setupScene } from "./setupScene";
 import { MeasureTool, PanTool, SelectTool, Tool } from "./tools";
-import { DxfViewerProps, EntityInfo } from "./types";
+import { DxfViewerProps, EntityInfo, LayerInfo } from "./types";
 import { DxfAnalyzer } from "./utils/DxfAnalyzer";
 
 // Hook to manage the viewer logic
@@ -57,6 +57,7 @@ export const useDxfViewer = ({
   const [measureText, setMeasureText] = useState<string | null>(null);
   const [stats, setStats] = useState<Record<string, number | string>>({});
   const [analyzedData, setAnalyzedData] = useState<any>(null);
+  const [layers, setLayers] = useState<LayerInfo[]>([]);
 
   // Track container dimensions
   useLayoutEffect(() => {
@@ -110,9 +111,23 @@ export const useDxfViewer = ({
     entities,
     parseError,
     dxfHeader,
+    layers: processedLayers,
+    layerTable,
   } = useMemo(() => {
     return processDxf(dxfContent || "", material, showShapeColors);
   }, [dxfContent, material, showShapeColors]);
+
+  // Initial layer state
+  useEffect(() => {
+    if (layerTable) {
+      const initialLayers = Object.entries(layerTable).map(([name, data]) => ({
+        name,
+        color: data.color,
+        visible: true,
+      }));
+      setLayers(initialLayers);
+    }
+  }, [layerTable]);
 
   // Update stats state
   useEffect(() => {
@@ -358,6 +373,24 @@ export const useDxfViewer = ({
     processedStats,
   ]);
 
+  const toggleLayer = useCallback(
+    (layerName: string) => {
+      setLayers((prev) =>
+        prev.map((layer) =>
+          layer.name === layerName
+            ? { ...layer, visible: !layer.visible }
+            : layer
+        )
+      );
+
+      if (processedLayers && processedLayers[layerName]) {
+        processedLayers[layerName].visible =
+          !processedLayers[layerName].visible;
+      }
+    },
+    [processedLayers]
+  );
+
   return {
     containerRef,
     currentTool,
@@ -368,6 +401,8 @@ export const useDxfViewer = ({
     stats,
     analyzedData,
     error,
+    layers,
+    toggleLayer,
     // Expose internal instances for extension
     scene: sceneRef.current,
     camera: cameraRef.current,
