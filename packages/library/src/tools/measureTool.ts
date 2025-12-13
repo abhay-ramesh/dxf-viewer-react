@@ -1,4 +1,6 @@
 import * as THREE from "three";
+import { SnapPoint } from "../types";
+import { SnappingUtils } from "../utils/SnappingUtils";
 import { Tool, ToolContext } from "./types";
 
 export class MeasureTool implements Tool {
@@ -73,10 +75,6 @@ export class MeasureTool implements Tool {
     // Reset state
     this.points = [];
     this.clearMeasurement(scene);
-
-    // Clear any existing snap points
-    this.snapPoints.forEach((point) => scene.remove(point));
-    this.snapPoints = [];
   }
 
   deactivate({ controls, scene }: ToolContext) {
@@ -122,67 +120,25 @@ export class MeasureTool implements Tool {
     if (this.endPoint) this.endPoint.visible = false;
   }
 
-  private findNearestPoint(
-    point: THREE.Vector3,
-    group: THREE.Group
-  ): THREE.Vector3 | null {
-    let nearestPoint = null;
-    let minDistance = this.snapDistance;
-
-    group.traverse((object) => {
-      if (object instanceof THREE.Line) {
-        const positions = object.geometry.getAttribute("position");
-
-        // Check vertices first
-        for (let i = 0; i < positions.count; i++) {
-          const vertex = new THREE.Vector3();
-          vertex.fromBufferAttribute(positions, i);
-          object.localToWorld(vertex);
-
-          const distance = point.distanceTo(vertex);
-          if (distance < minDistance) {
-            minDistance = distance;
-            nearestPoint = vertex.clone();
-          }
-        }
-
-        // Then check line segments for perpendicular points
-        for (let i = 0; i < positions.count - 1; i++) {
-          const start = new THREE.Vector3();
-          const end = new THREE.Vector3();
-          start.fromBufferAttribute(positions, i);
-          end.fromBufferAttribute(positions, i + 1);
-          object.localToWorld(start);
-          object.localToWorld(end);
-
-          // Calculate line segment vector
-          const line = end.clone().sub(start);
-          const lineLength = line.length();
-
-          // Calculate vector from start to point
-          const pointVector = point.clone().sub(start);
-
-          // Project point onto line
-          const projection = pointVector.dot(line) / lineLength;
-
-          // Only use projection if it falls within the line segment
-          if (projection >= 0 && projection <= lineLength) {
-            const normalizedLine = line.clone().divideScalar(lineLength);
-            const projectedPoint = start
-              .clone()
-              .add(normalizedLine.multiplyScalar(projection));
-
-            const distance = point.distanceTo(projectedPoint);
-            if (distance < minDistance) {
-              minDistance = distance;
-              nearestPoint = projectedPoint;
-            }
-          }
-        }
+  private findNearestPoint(group: THREE.Group): SnapPoint | null {
+    // Collect all objects in the group
+    const objects: THREE.Object3D[] = [];
+    group.traverse((obj) => {
+      if (
+        obj instanceof THREE.Line ||
+        (obj.userData &&
+          (obj.userData.entityType === "CIRCLE" ||
+            obj.userData.entityType === "ARC"))
+      ) {
+        objects.push(obj);
       }
     });
 
-    return nearestPoint;
+    return SnappingUtils.getSnapPoint(
+      this.raycaster,
+      objects,
+      this.snapDistance
+    );
   }
 
   // private createMeasurementText(
@@ -223,56 +179,6 @@ export class MeasureTool implements Tool {
   // }
 
   private snapPoints: THREE.Mesh[] = [];
-  private snapPointMaterial = new THREE.MeshBasicMaterial({
-    color: 0x00ff00,
-    opacity: 0.3,
-    transparent: true,
-    depthTest: false,
-  });
-
-  private updateSnapPoints(
-    scene: THREE.Scene,
-    group: THREE.Group,
-    currentPoint: THREE.Vector3
-  ) {
-    // Clear existing snap points
-    this.snapPoints.forEach((point) => scene.remove(point));
-    this.snapPoints = [];
-
-    // Find the nearest point
-    let nearestPoint = null;
-    let minDistance = this.snapDistance * 2;
-
-    group.traverse((object) => {
-      if (object instanceof THREE.Line) {
-        const positions = object.geometry.getAttribute("position");
-        for (let i = 0; i < positions.count; i++) {
-          const vertex = new THREE.Vector3();
-          vertex.fromBufferAttribute(positions, i);
-          object.localToWorld(vertex);
-
-          const distance = currentPoint.distanceTo(vertex);
-          if (distance < minDistance) {
-            minDistance = distance;
-            nearestPoint = vertex;
-          }
-        }
-      }
-    });
-
-    // Only show the nearest point if one was found
-    if (nearestPoint) {
-      const snapPointGeometry = new THREE.SphereGeometry(0.2, 8, 8);
-      const snapPoint = new THREE.Mesh(
-        snapPointGeometry,
-        this.snapPointMaterial
-      );
-      snapPoint.position.copy(nearestPoint);
-      snapPoint.renderOrder = 997;
-      scene.add(snapPoint);
-      this.snapPoints.push(snapPoint);
-    }
-  }
 
   private updateMeasurement(distance: number | null) {
     if (distance === null) {
@@ -317,23 +223,48 @@ export class MeasureTool implements Tool {
     this.raycaster.ray.intersectPlane(plane, intersectPoint);
 
     // Find nearest snap point
-    const nearestPoint = this.findNearestPoint(intersectPoint, group);
-    let currentPoint = nearestPoint || intersectPoint;
+    const snapResult = this.findNearestPoint(group);
+    let currentPoint = snapResult ? snapResult.point : intersectPoint;
 
     // If shift is pressed and we have a start point, constrain to 90 degrees
     if (event.shiftKey && this.points.length === 1) {
       currentPoint = this.constrainTo90Degrees(this.points[0], currentPoint);
     }
 
-    // Update snap points visualization
-    this.updateSnapPoints(scene, group, currentPoint);
-
     // Update snap indicator
     if (this.snapIndicator) {
       this.snapIndicator.position.copy(currentPoint);
       this.snapIndicator.visible = true;
       if (this.snapIndicator.material instanceof THREE.MeshBasicMaterial) {
-        this.snapIndicator.material.opacity = nearestPoint ? 1.0 : 0.7;
+        // Change color based on snap type if snapped
+        if (snapResult) {
+          this.snapIndicator.material.opacity = 1.0;
+          switch (snapResult.type) {
+            case "endpoint":
+              this.snapIndicator.material.color.setHex(0xff0000);
+              break; // Red for Endpoint
+            case "midpoint":
+              this.snapIndicator.material.color.setHex(0x00ffff);
+              break; // Cyan for Midpoint
+            case "center":
+              this.snapIndicator.material.color.setHex(0xffff00);
+              break; // Yellow for Center
+            case "quadrant":
+              this.snapIndicator.material.color.setHex(0xff00ff);
+              break; // Magenta for Quadrant
+            case "intersection":
+              this.snapIndicator.material.color.setHex(0x00ff00);
+              break; // Green for Intersection
+            case "nearest":
+              this.snapIndicator.material.color.setHex(0xaaaaaa);
+              break; // Grey for Nearest
+            default:
+              this.snapIndicator.material.color.setHex(0x00ff00);
+          }
+        } else {
+          this.snapIndicator.material.opacity = 0.5;
+          this.snapIndicator.material.color.setHex(0x00ff00);
+        }
       }
     }
 
@@ -369,7 +300,8 @@ export class MeasureTool implements Tool {
     this.raycaster.ray.intersectPlane(plane, intersectPoint);
 
     // Use snapped point if available
-    let point = this.findNearestPoint(intersectPoint, group) || intersectPoint;
+    const snapResult = this.findNearestPoint(group);
+    let point = snapResult ? snapResult.point : intersectPoint;
 
     // If shift is pressed and we have a start point, constrain to 90 degrees
     if (event.shiftKey && this.points.length === 1) {

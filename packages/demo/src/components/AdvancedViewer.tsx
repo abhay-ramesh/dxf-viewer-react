@@ -4,11 +4,13 @@ import {
   ChevronLeft,
   Eye,
   EyeOff,
+  Image,
   Layers,
   Maximize2,
   Moon,
   MousePointer2,
   Move,
+  Printer,
   Ruler,
   Settings,
   Sun,
@@ -45,6 +47,7 @@ export const AdvancedViewer: React.FC<AdvancedViewerProps> = ({ onBack }) => {
     analyzedData,
     layers,
     toggleLayer,
+    exportImage,
   } = useDxfViewer({
     dxfContent,
     showGrid,
@@ -112,6 +115,48 @@ export const AdvancedViewer: React.FC<AdvancedViewerProps> = ({ onBack }) => {
     reader.readAsText(file);
   };
 
+  const handleExportImage = () => {
+    const dataUrl = exportImage("png");
+    if (dataUrl) {
+      const link = document.createElement("a");
+      link.href = dataUrl;
+      link.download = `${fileName.replace(".dxf", "")}_view.png`;
+      link.click();
+      addToHistory("Exported image");
+    } else {
+      addToHistory("Failed to export image");
+    }
+  };
+
+  const handlePrint = () => {
+    const dataUrl = exportImage("png");
+    if (dataUrl) {
+      const windowContent = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>Print - ${fileName}</title>
+            <style>
+              body { margin: 0; display: flex; justify-content: center; align-items: center; height: 100vh; }
+              img { max-width: 100%; max-height: 100%; object-fit: contain; }
+              @media print { body { -webkit-print-color-adjust: exact; } }
+            </style>
+          </head>
+          <body>
+            <img src="${dataUrl}" onload="window.print();window.close()" />
+          </body>
+        </html>
+      `;
+      const printWindow = window.open("", "_blank");
+      if (printWindow) {
+        printWindow.document.open();
+        printWindow.document.write(windowContent);
+        printWindow.document.close();
+        addToHistory("Printing...");
+      }
+    }
+  };
+
   return (
     <div className="app-container advanced-mode">
       {/* Top Menu Bar (AutoCAD style) */}
@@ -139,6 +184,20 @@ export const AdvancedViewer: React.FC<AdvancedViewerProps> = ({ onBack }) => {
               onChange={handleFileUpload}
             />
           </label>
+          <button
+            className="menu-btn"
+            onClick={handleExportImage}
+            title="Export as PNG"
+          >
+            <Image size={14} /> Export
+          </button>
+          <button
+            className="menu-btn"
+            onClick={handlePrint}
+            title="Print / PDF"
+          >
+            <Printer size={14} /> Print
+          </button>
         </div>
         <div className="filename-display">{fileName}</div>
       </div>

@@ -1687,6 +1687,13 @@ export function processDxf(
           layer: entity.layer || "0",
         };
 
+        // Add specific geometry data for snapping
+        if (entity.type === "CIRCLE" || entity.type === "ARC") {
+          const circleEntity = entity as ICircleEntity | IArcEntity;
+          object.userData.center = circleEntity.center;
+          object.userData.radius = circleEntity.radius;
+        }
+
         // Add to appropriate layer group
         const layerName = entity.layer || "0";
         if (!layers[layerName]) {

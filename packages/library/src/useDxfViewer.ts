@@ -391,6 +391,16 @@ export const useDxfViewer = ({
     [processedLayers]
   );
 
+  const exportImage = useCallback((format: "png" | "jpeg" = "png") => {
+    if (!rendererRef.current || !sceneRef.current || !cameraRef.current)
+      return null;
+
+    // Render one last time to ensure everything is up to date
+    rendererRef.current.render(sceneRef.current, cameraRef.current);
+
+    return rendererRef.current.domElement.toDataURL(`image/${format}`);
+  }, []);
+
   return {
     containerRef,
     currentTool,
@@ -403,6 +413,7 @@ export const useDxfViewer = ({
     error,
     layers,
     toggleLayer,
+    exportImage,
     // Expose internal instances for extension
     scene: sceneRef.current,
     camera: cameraRef.current,

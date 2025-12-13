@@ -18,6 +18,20 @@ export interface LayerInfo {
   visible: boolean;
 }
 
+export type SnapType =
+  | "endpoint"
+  | "midpoint"
+  | "center"
+  | "intersection"
+  | "quadrant"
+  | "nearest";
+
+export interface SnapPoint {
+  point: THREE.Vector3;
+  type: SnapType;
+  distance: number;
+}
+
 export interface DxfViewerProps {
   /** The DXF file content as a string */
   dxfContent: string | null;
