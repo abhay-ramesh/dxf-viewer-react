@@ -1,23 +1,20 @@
 import * as THREE from "three";
+import { EntityInfo } from "../types";
 import { Tool, ToolContext } from "./types";
-
-interface EntityInfo {
-  type: string;
-  length?: number;
-  radius?: number;
-  center?: THREE.Vector3;
-  startPoint?: THREE.Vector3;
-  endPoint?: THREE.Vector3;
-  vertices?: number;
-}
 
 export class SelectTool implements Tool {
   type = "select" as const;
   private raycaster = new THREE.Raycaster();
-  private selectedObject: THREE.Object3D | null = null;
+
+  // Selection state
+  private selectedObjects: THREE.Object3D[] = [];
+  private originalMaterials: Map<THREE.Object3D, THREE.Material> = new Map();
+
+  // Hover state
   private hoveredObject: THREE.Object3D | null = null;
-  private originalMaterial: THREE.Material | null = null;
   private hoveredMaterial: THREE.Material | null = null;
+
+  // Materials
   private highlightMaterial = new THREE.LineBasicMaterial({
     color: 0xff0000,
     linewidth: 2,
@@ -27,6 +24,18 @@ export class SelectTool implements Tool {
     linewidth: 1.5,
     opacity: 0.7,
     transparent: true,
+  });
+  private meshHighlightMaterial = new THREE.MeshBasicMaterial({
+    color: 0xff0000,
+    opacity: 0.5,
+    transparent: true,
+    side: THREE.DoubleSide,
+  });
+  private meshHoverMaterial = new THREE.MeshBasicMaterial({
+    color: 0x00ff00,
+    opacity: 0.5,
+    transparent: true,
+    side: THREE.DoubleSide,
   });
 
   constructor(
@@ -55,17 +64,54 @@ export class SelectTool implements Tool {
   }
 
   private clearSelection() {
-    if (this.selectedObject && this.originalMaterial) {
-      (this.selectedObject as THREE.Line).material = this.originalMaterial;
-      this.selectedObject = null;
-      this.originalMaterial = null;
-      this.onInfoUpdate?.(null);
+    this.selectedObjects.forEach((object) => {
+      const originalMaterial = this.originalMaterials.get(object);
+      if (originalMaterial) {
+        if (
+          object instanceof THREE.Line ||
+          object instanceof THREE.LineSegments
+        ) {
+          object.material = originalMaterial;
+        } else if (object instanceof THREE.Mesh) {
+          object.material = originalMaterial;
+        }
+      }
+    });
+    this.selectedObjects = [];
+    this.originalMaterials.clear();
+    this.onInfoUpdate?.(null);
+  }
+
+  private selectObject(object: THREE.Object3D) {
+    if (
+      object instanceof THREE.Line ||
+      object instanceof THREE.LineSegments ||
+      object instanceof THREE.Mesh
+    ) {
+      if (!this.originalMaterials.has(object)) {
+        this.originalMaterials.set(object, object.material as THREE.Material);
+      }
+
+      if (object instanceof THREE.Mesh) {
+        object.material = this.meshHighlightMaterial;
+      } else {
+        object.material = this.highlightMaterial;
+      }
+
+      this.selectedObjects.push(object);
     }
   }
 
   private clearHover() {
     if (this.hoveredObject && this.hoveredMaterial) {
-      (this.hoveredObject as THREE.Line).material = this.hoveredMaterial;
+      if (
+        this.hoveredObject instanceof THREE.Line ||
+        this.hoveredObject instanceof THREE.LineSegments
+      ) {
+        this.hoveredObject.material = this.hoveredMaterial;
+      } else if (this.hoveredObject instanceof THREE.Mesh) {
+        this.hoveredObject.material = this.hoveredMaterial;
+      }
       this.hoveredObject = null;
       this.hoveredMaterial = null;
       this.onHoverUpdate?.(null, 0, 0);
@@ -74,35 +120,52 @@ export class SelectTool implements Tool {
 
   private getEntityInfo(object: THREE.Object3D): EntityInfo {
     const info: EntityInfo = {
-      type: object.userData.type || "Unknown",
+      type: object.userData.entityType || object.userData.type || "Unknown",
+      layer: object.userData.layer || "0",
     };
 
-    if (object instanceof THREE.Line) {
+    if (object.userData.outerArea) {
+      info.area = object.userData.outerArea;
+    }
+
+    if (object instanceof THREE.Line || object instanceof THREE.LineSegments) {
       const geometry = object.geometry;
       const positions = geometry.getAttribute("position");
 
       // Calculate length
       let length = 0;
-      for (let i = 0; i < positions.count - 1; i++) {
-        const point1 = new THREE.Vector3();
-        const point2 = new THREE.Vector3();
-        point1.fromBufferAttribute(positions, i);
-        point2.fromBufferAttribute(positions, i + 1);
-        length += point1.distanceTo(point2);
-      }
-      info.length = length;
+      if (positions) {
+        for (let i = 0; i < positions.count - 1; i++) {
+          const point1 = new THREE.Vector3();
+          const point2 = new THREE.Vector3();
+          point1.fromBufferAttribute(positions, i);
+          point2.fromBufferAttribute(positions, i + 1);
 
-      // Get start and end points
-      if (positions.count > 0) {
-        const start = new THREE.Vector3();
-        start.fromBufferAttribute(positions, 0);
-        object.localToWorld(start);
-        info.startPoint = start;
+          // Only add distance if not a line segment break (for THREE.LineSegments)
+          if (object instanceof THREE.LineSegments) {
+            if (i % 2 === 0) {
+              length += point1.distanceTo(point2);
+            }
+          } else {
+            length += point1.distanceTo(point2);
+          }
+        }
+        info.length = length;
 
-        const end = new THREE.Vector3();
-        end.fromBufferAttribute(positions, positions.count - 1);
-        object.localToWorld(end);
-        info.endPoint = end;
+        // Get start and end points
+        if (positions.count > 0) {
+          const start = new THREE.Vector3();
+          start.fromBufferAttribute(positions, 0);
+          object.localToWorld(start);
+          info.startPoint = start;
+
+          const end = new THREE.Vector3();
+          end.fromBufferAttribute(positions, positions.count - 1);
+          object.localToWorld(end);
+          info.endPoint = end;
+        }
+        // Get number of vertices
+        info.vertices = positions.count;
       }
 
       // Get center point
@@ -114,12 +177,29 @@ export class SelectTool implements Tool {
         info.center = center;
       }
 
-      // Get number of vertices
-      info.vertices = positions.count;
-
-      // Get radius if it's a circle/arc
-      if (object.userData.type === "CIRCLE" || object.userData.type === "ARC") {
+      // Get radius if it's a circle/arc (from userData populated in processDxf)
+      if (object.userData.radius) {
         info.radius = object.userData.radius;
+      }
+
+      // Override center if available in userData (more accurate for circles/arcs)
+      if (object.userData.center) {
+        const c = new THREE.Vector3(
+          object.userData.center.x,
+          object.userData.center.y,
+          object.userData.center.z || 0
+        );
+        object.localToWorld(c);
+        info.center = c;
+      }
+    } else if (object instanceof THREE.Mesh) {
+      // Handle Shape Meshes (Fills)
+      const geometry = object.geometry;
+      geometry.computeBoundingSphere();
+      if (geometry.boundingSphere) {
+        const center = new THREE.Vector3().copy(geometry.boundingSphere.center);
+        object.localToWorld(center);
+        info.center = center;
       }
     }
 
@@ -146,15 +226,24 @@ export class SelectTool implements Tool {
     // Set new hover state if we're hovering over a new object that isn't selected
     if (
       intersects.length > 0 &&
-      intersects[0].object !== this.selectedObject &&
+      !this.selectedObjects.includes(intersects[0].object) &&
       intersects[0].object !== this.hoveredObject
     ) {
       const newHoverObject = intersects[0].object;
-      if (newHoverObject instanceof THREE.Line) {
+      if (
+        newHoverObject instanceof THREE.Line ||
+        newHoverObject instanceof THREE.LineSegments ||
+        newHoverObject instanceof THREE.Mesh
+      ) {
         // Store original material before setting hover
         this.hoveredObject = newHoverObject;
-        this.hoveredMaterial = newHoverObject.material;
-        newHoverObject.material = this.hoverMaterial;
+        this.hoveredMaterial = newHoverObject.material as THREE.Material;
+
+        if (newHoverObject instanceof THREE.Mesh) {
+          newHoverObject.material = this.meshHoverMaterial;
+        } else {
+          newHoverObject.material = this.hoverMaterial;
+        }
 
         // Get and display hover info
         const info = this.getEntityInfo(newHoverObject);
@@ -182,11 +271,44 @@ export class SelectTool implements Tool {
 
     if (intersects.length > 0) {
       const newSelection = intersects[0].object;
-      if (newSelection instanceof THREE.Line) {
-        // Store original material before setting selection
-        this.selectedObject = newSelection;
-        this.originalMaterial = newSelection.material;
-        newSelection.material = this.highlightMaterial;
+
+      // Check if this object is part of a loop
+      const loopId = newSelection.userData.loopId;
+
+      if (loopId) {
+        // Find all objects in this loop (search recursively in the group)
+        const loopObjects: THREE.Object3D[] = [];
+        group.traverse((obj) => {
+          if (obj.userData.loopId === loopId) {
+            loopObjects.push(obj);
+          }
+        });
+
+        if (loopObjects.length > 0) {
+          loopObjects.forEach((obj) => this.selectObject(obj));
+
+          // Calculate aggregate info
+          const info = this.getEntityInfo(newSelection);
+          info.type = "Closed Loop";
+
+          let totalLength = 0;
+          loopObjects.forEach((obj) => {
+            const objInfo = this.getEntityInfo(obj);
+            if (objInfo.length) totalLength += objInfo.length;
+          });
+          info.length = totalLength;
+
+          this.onInfoUpdate?.(info);
+          return;
+        }
+      }
+
+      if (
+        newSelection instanceof THREE.Line ||
+        newSelection instanceof THREE.LineSegments ||
+        newSelection instanceof THREE.Mesh
+      ) {
+        this.selectObject(newSelection);
 
         // Get and display entity info
         const info = this.getEntityInfo(newSelection);

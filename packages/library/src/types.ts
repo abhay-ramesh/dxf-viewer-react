@@ -4,12 +4,15 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
 export interface EntityInfo {
   type: string;
+  layer: string;
+  color?: string;
   length?: number;
   radius?: number;
   center?: THREE.Vector3;
   startPoint?: THREE.Vector3;
   endPoint?: THREE.Vector3;
   vertices?: number;
+  area?: number;
 }
 
 export interface LayerInfo {

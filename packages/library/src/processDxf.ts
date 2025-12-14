@@ -1516,10 +1516,14 @@ export function processDxf(
 
   // Create a set of entities that are part of closed loops
   const closedLoopEntities = new Set();
+  const entityLoopMap = new Map<IEntity, string>();
+
   if (showShapeColors) {
-    [...outerLoops, ...holes].forEach((loop) => {
+    [...outerLoops, ...holes].forEach((loop, index) => {
+      const loopId = `loop_${index}`;
       loop.entities.forEach((entity) => {
         closedLoopEntities.add(entity);
+        entityLoopMap.set(entity, loopId);
       });
     });
   }
@@ -1684,6 +1688,7 @@ export function processDxf(
         object.userData = {
           entityType: entity.type,
           isClosedLoop: closedLoopEntities.has(entity),
+          loopId: entityLoopMap.get(entity),
           layer: entity.layer || "0",
         };
 

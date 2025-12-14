@@ -341,11 +341,15 @@ export const AdvancedViewer: React.FC<AdvancedViewerProps> = ({ onBack }) => {
               <div className="prop-group-title">General</div>
               <div className="prop-row">
                 <span className="prop-label">Color</span>
-                <span className="prop-value">ByLayer</span>
+                <span className="prop-value">
+                  {selectedEntityInfo?.color || "ByLayer"}
+                </span>
               </div>
               <div className="prop-row">
                 <span className="prop-label">Layer</span>
-                <span className="prop-value">0</span>
+                <span className="prop-value">
+                  {selectedEntityInfo?.layer || "0"}
+                </span>
               </div>
               <div className="prop-row">
                 <span className="prop-label">Linetype</span>
@@ -365,6 +369,14 @@ export const AdvancedViewer: React.FC<AdvancedViewerProps> = ({ onBack }) => {
                     <span className="prop-label">Length</span>
                     <span className="prop-value">
                       {selectedEntityInfo.length.toFixed(4)}
+                    </span>
+                  </div>
+                )}
+                {selectedEntityInfo.area !== undefined && (
+                  <div className="prop-row">
+                    <span className="prop-label">Area</span>
+                    <span className="prop-value">
+                      {selectedEntityInfo.area.toFixed(4)}
                     </span>
                   </div>
                 )}
