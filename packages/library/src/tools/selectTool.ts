@@ -272,41 +272,25 @@ export class SelectTool implements Tool {
     if (intersects.length > 0) {
       const newSelection = intersects[0].object;
 
-      // Check if this object is part of a loop
-      const loopId = newSelection.userData.loopId;
+      // Handle Mesh Selection (Fill/Area)
+      if (newSelection instanceof THREE.Mesh) {
+        this.selectObject(newSelection);
 
-      if (loopId) {
-        // Find all objects in this loop (search recursively in the group)
-        const loopObjects: THREE.Object3D[] = [];
-        group.traverse((obj) => {
-          if (obj.userData.loopId === loopId) {
-            loopObjects.push(obj);
-          }
-        });
-
-        if (loopObjects.length > 0) {
-          loopObjects.forEach((obj) => this.selectObject(obj));
-
-          // Calculate aggregate info
-          const info = this.getEntityInfo(newSelection);
-          info.type = "Closed Loop";
-
-          let totalLength = 0;
-          loopObjects.forEach((obj) => {
-            const objInfo = this.getEntityInfo(obj);
-            if (objInfo.length) totalLength += objInfo.length;
-          });
-          info.length = totalLength;
-
-          this.onInfoUpdate?.(info);
-          return;
+        // Use perimeter from userData if available
+        const info = this.getEntityInfo(newSelection);
+        if (newSelection.userData.perimeter) {
+          info.length = newSelection.userData.perimeter;
+          info.type = "Closed Loop"; // Force type for UI
         }
+
+        this.onInfoUpdate?.(info);
+        return;
       }
 
+      // Handle Line Selection (Individual Lines)
       if (
         newSelection instanceof THREE.Line ||
-        newSelection instanceof THREE.LineSegments ||
-        newSelection instanceof THREE.Mesh
+        newSelection instanceof THREE.LineSegments
       ) {
         this.selectObject(newSelection);
 

@@ -366,7 +366,11 @@ export const AdvancedViewer: React.FC<AdvancedViewerProps> = ({ onBack }) => {
                 </div>
                 {selectedEntityInfo.length !== undefined && (
                   <div className="prop-row">
-                    <span className="prop-label">Length</span>
+                    <span className="prop-label">
+                      {selectedEntityInfo.type === "Closed Loop"
+                        ? "Perimeter"
+                        : "Length"}
+                    </span>
                     <span className="prop-value">
                       {selectedEntityInfo.length.toFixed(4)}
                     </span>

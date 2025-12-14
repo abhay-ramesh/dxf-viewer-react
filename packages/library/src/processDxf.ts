@@ -1749,6 +1749,7 @@ export function processDxf(
             entityType: "SHAPE_WITH_HOLES",
             shapeIndex: index,
             outerArea: shapeGroup.outerLoop.area,
+            perimeter: shapeGroup.outerLoop.perimeter, // Add perimeter to userData
             holeCount: shapeGroup.containedHoles.length,
             totalHoleArea: shapeGroup.containedHoles.reduce(
               (sum, hole) => sum + hole.area,
