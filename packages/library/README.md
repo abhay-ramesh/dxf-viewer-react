@@ -6,13 +6,15 @@ A React component library and hook for viewing DXF (Drawing Exchange Format) fil
 
 ## Features
 
-- 🚀 **Fast Rendering**: Powered by Three.js for efficient 2D/3D visualization
-- 🧩 **Headless Hook**: `useDxfViewer` hook for complete UI control
-- 📦 **Ready-to-use Component**: `<DxfViewer />` for quick integration
-- 🛠️ **Interactive Tools**: Built-in support for Panning, Zooming, Selecting, and Measuring
-- 📏 **Measurement**: Accurate distance measurements with snapping
-- 🎨 **Layer Support**: Toggle visibility of DXF layers (coming soon)
-- 📱 **Responsive**: Adapts to container size
+- **Fast Rendering**: Powered by Three.js for efficient 2D/3D visualization
+- **Headless Hook**: `useDxfViewer` hook for complete UI control
+- **Ready-to-use Component**: `<DxfViewer />` for quick integration
+- **Interactive Tools**: Built-in support for Panning, Zooming, Selecting, and Measuring
+- **Advanced Snapping**: Endpoint, Midpoint, Center, Intersection, and Nearest snapping
+- **Layer Support**: Toggle visibility of DXF layers and view layer colors
+- **Block Support**: Renders nested blocks and inserts correctly
+- **Closed Loop Detection**: Automatically detects and fills closed shapes
+- **Responsive**: Adapts to container size
 
 ## Installation
 
