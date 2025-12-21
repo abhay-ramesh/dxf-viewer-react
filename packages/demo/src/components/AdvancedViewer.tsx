@@ -35,8 +35,8 @@ export const AdvancedViewer: React.FC<AdvancedViewerProps> = ({ onBack }) => {
   const [showGrid, setShowGrid] = useState(true);
   const [showAxes] = useState(true);
   const [commandHistory, setCommandHistory] = useState<string[]>([
-    "Welcome to DXF CAD Pro",
-    "Ready for input...",
+    "DXF Viewer initialized.",
+    "Command line ready.",
   ]);
 
   // Initialize the headless viewer hook
@@ -269,7 +269,9 @@ export const AdvancedViewer: React.FC<AdvancedViewerProps> = ({ onBack }) => {
           icon: <Info size={14} />,
           onClick: () =>
             addToHistory(
-              `DXF Viewer React v${process.env.npm_package_version || "1.0.0"}`
+              `dxf-viewer-react v${
+                process.env.npm_package_version || "0.2.0"
+              } - Build 2024.1`
             ),
         },
       ],

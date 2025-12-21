@@ -1,5 +1,5 @@
-import React from "react";
 import { ArrowRight, Eye, Layers } from "lucide-react";
+import React from "react";
 import "../App.css";
 
 interface LandingProps {
@@ -12,9 +12,10 @@ export const Landing: React.FC<LandingProps> = ({ onNavigate }) => {
       <div className="landing-content">
         <h1 className="landing-title">DXF Viewer React</h1>
         <p className="landing-subtitle">
-          High-performance, headless DXF visualization for the web.
+          A high-performance, Three.js-based DXF visualization library for React
+          applications.
           <br />
-          Select a mode to explore the capabilities.
+          Explore the capabilities below.
         </p>
 
         <div className="mode-cards">
@@ -23,13 +24,14 @@ export const Landing: React.FC<LandingProps> = ({ onNavigate }) => {
             <div className="card-icon simple">
               <Eye size={48} />
             </div>
-            <h2>Quick View Mode</h2>
+            <h2>Quick Preview</h2>
             <p>
-              Minimalist interface focused on viewing, panning, and basic
-              measurement. Ideal for simple file previews and embedding.
+              A lightweight interface focused on essential viewing, panning, and
+              measurement. Ideal for quick file inspections and simple
+              embedding.
             </p>
             <div className="card-action">
-              Launch Viewer <ArrowRight size={16} />
+              Open Viewer <ArrowRight size={16} />
             </div>
           </div>
 
@@ -38,13 +40,14 @@ export const Landing: React.FC<LandingProps> = ({ onNavigate }) => {
             <div className="card-icon advanced">
               <Layers size={48} />
             </div>
-            <h2>Pro CAD Mode</h2>
+            <h2>Advanced CAD</h2>
             <p>
-              Full-featured interface mimicking professional CAD software.
-              Includes selection, detailed properties, layers, and command line.
+              A comprehensive interface demonstrating the full power of the
+              library. Features layer management, entity inspection, advanced
+              snapping, and more.
             </p>
             <div className="card-action">
-              Launch Pro Mode <ArrowRight size={16} />
+              Launch Advanced Mode <ArrowRight size={16} />
             </div>
           </div>
         </div>
@@ -52,4 +55,3 @@ export const Landing: React.FC<LandingProps> = ({ onNavigate }) => {
     </div>
   );
 };
-

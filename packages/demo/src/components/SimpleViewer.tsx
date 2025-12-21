@@ -48,7 +48,7 @@ export const SimpleViewer: React.FC<SimpleViewerProps> = ({ onBack }) => {
         <button onClick={onBack} className="simple-back-btn">
           <ChevronLeft size={20} /> Back
         </button>
-        <div className="simple-title">DXF Quick View</div>
+        <div className="simple-title">DXF Preview</div>
         <label className="simple-upload-btn">
           <Upload size={16} /> Open File
           <input type="file" accept=".dxf" hidden onChange={handleFile} />
