@@ -416,11 +416,70 @@ export const AdvancedViewer: React.FC<AdvancedViewerProps> = ({ onBack }) => {
             <div className="prop-group">
               <div className="prop-group-title">Statistics</div>
               <div className="prop-row">
-                <span className="prop-label">Entities</span>
+                <span className="prop-label">Total Entities</span>
                 <span className="prop-value">
                   {analyzedData?.totalEntities || 0}
                 </span>
               </div>
+              {analyzedData?.entityTypes?.map(
+                (stat: { type: string; count: number | string }) => {
+                  if (stat.type === "SHAPES_WITH_HOLES") {
+                    return (
+                      <div className="prop-row" key={stat.type}>
+                        <span className="prop-label">Filled Shapes</span>
+                        <span className="prop-value">{stat.count}</span>
+                      </div>
+                    );
+                  }
+                  if (stat.type === "TOTAL_CLOSED_LOOPS") {
+                    return (
+                      <div className="prop-row" key={stat.type}>
+                        <span className="prop-label">Total Closed Loops</span>
+                        <span className="prop-value">{stat.count}</span>
+                      </div>
+                    );
+                  }
+                  return null;
+                }
+              )}
+
+              <div
+                className="prop-separator"
+                style={{ margin: "8px 0", borderTop: "1px solid #333" }}
+              />
+
+              {analyzedData?.entityTypes?.map(
+                (stat: { type: string; count: number | string }) => {
+                  // Skip non-entity stats and the one we already showed
+                  const skipKeys = [
+                    "SHAPES_WITH_HOLES",
+                    "TOTAL_HOLES",
+                    "GEOMETRIC_HOLES",
+                    "TOTAL_CLOSED_LOOPS",
+                    "DXF_UNITS",
+                    "DXF_UNITS_FORMAT",
+                    "DXF_MEASUREMENT",
+                    "GRID_SIZE",
+                    "GRID_DIVISIONS",
+                    "GRID_UNIT_SIZE",
+                    "DETECTION_METHOD",
+                  ];
+
+                  if (skipKeys.includes(stat.type)) return null;
+
+                  return (
+                    <div className="prop-row" key={stat.type}>
+                      <span
+                        className="prop-label"
+                        style={{ textTransform: "capitalize" }}
+                      >
+                        {stat.type.toLowerCase()}
+                      </span>
+                      <span className="prop-value">{stat.count}</span>
+                    </div>
+                  );
+                }
+              )}
             </div>
           </div>
         </div>
