@@ -7,6 +7,7 @@ export class PanTool implements Tool {
     controls.enablePan = true;
     controls.enableRotate = false;
     controls.mouseButtons.LEFT = 2; // THREE.MOUSE.PAN
+    controls.mouseButtons.MIDDLE = 2; // THREE.MOUSE.PAN - middle mouse for panning
     controls.touches.ONE = 2; // THREE.TOUCH.PAN
   }
 
