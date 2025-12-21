@@ -18,7 +18,7 @@ const SimpleViewerWrapper = () => {
 const AdvancedViewerWrapper = () => {
   const navigate = useNavigate();
   return <AdvancedViewer onBack={() => navigate("/")} />;
-};
+      };
 
 function App() {
   return (

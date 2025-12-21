@@ -51,10 +51,18 @@ export function setupCamera({
     10000
   );
 
+  // Set default zoom to 0.8 (zoomed out, showing more content)
+  camera.zoom = 0.8;
+  camera.updateProjectionMatrix();
+
   // Position camera directly above the DXF content center looking down (for true 2D view)
   // DXF content is positioned with bottom-left at origin, so center is at box center
-  camera.position.set(center.x, center.y, distance);
+  // Ensure Z position is positive (above the scene) and high enough
+  camera.position.set(center.x, center.y, Math.max(distance, 1));
+  // Always look straight down at z=0
   camera.lookAt(center.x, center.y, 0);
+  // Ensure up vector is correct for 2D view (Y is up in 2D)
+  camera.up.set(0, 1, 0);
 
   return { camera, center };
 }

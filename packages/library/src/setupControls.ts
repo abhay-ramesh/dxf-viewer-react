@@ -6,7 +6,19 @@ export function setupControls(
   renderer: THREE.WebGLRenderer,
   center: THREE.Vector3
 ) {
-  const controls = new OrbitControls(camera, renderer.domElement);
+  // Verify OrbitControls is available
+  if (typeof OrbitControls === 'undefined') {
+    console.error("[DXF Viewer] OrbitControls is not available in setupControls");
+    throw new Error("OrbitControls is not available. Three.js addons may not be properly bundled.");
+  }
+  
+  let controls;
+  try {
+    controls = new OrbitControls(camera, renderer.domElement);
+  } catch (error) {
+    console.error("[DXF Viewer] Error creating OrbitControls instance:", error);
+    throw error;
+  }
 
   // Basic settings for 2D orthographic view
   controls.enableDamping = false; // No damping for instant response
@@ -47,6 +59,19 @@ export function setupControls(
   // Make zoom feel more natural and instant
   // Higher zoom speed multiplier for wheel events
   controls.zoomToCursor = true; // Zoom towards cursor position for better UX
+
+  // Lock camera to 2D view (looking straight down)
+  // Polar angle: 0 = top, PI/2 = side, PI = bottom
+  // Set both min and max to PI/2 to lock looking straight down
+  controls.minPolarAngle = Math.PI / 2;
+  controls.maxPolarAngle = Math.PI / 2;
+  
+  // Allow rotation around Z axis (azimuthal) but keep it flat
+  controls.minAzimuthalAngle = -Infinity;
+  controls.maxAzimuthalAngle = Infinity;
+  
+  // Ensure we're always looking straight down
+  controls.target.set(center.x, center.y, 0);
 
   return controls;
 }

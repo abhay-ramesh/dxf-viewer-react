@@ -30,12 +30,20 @@ export const useDxfViewer = ({
   onError,
   onMeasureComplete,
 }: DxfViewerProps) => {
+  // SSR guard - don't initialize on server
+  const [isMounted, setIsMounted] = useState(false);
+  
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.OrthographicCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const animationFrameRef = useRef<number>();
+  const groupRef = useRef<THREE.Group | null>(null); // Track group reference
 
   const [error, setError] = useState<string | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
@@ -60,13 +68,25 @@ export const useDxfViewer = ({
   const [analyzedData, setAnalyzedData] = useState<any>(null);
   const [layers, setLayers] = useState<LayerInfo[]>([]);
 
-  // Track container dimensions
+  // Track container dimensions - initialize immediately with defaults
   useLayoutEffect(() => {
-    if (containerRef.current && !containerDimensions) {
-      setContainerDimensions({
-        width: containerRef.current.clientWidth,
-        height: containerRef.current.clientHeight,
-      });
+    if (containerRef.current) {
+      const width = containerRef.current.clientWidth || 800;
+      const height = containerRef.current.clientHeight || 600;
+      
+      // Always set dimensions if not set, or update if changed
+      if (!containerDimensions) {
+        setContainerDimensions({ width, height });
+      } else if (
+        containerDimensions.width !== width || 
+        containerDimensions.height !== height
+      ) {
+        setContainerDimensions({ width, height });
+      }
+    } else if (!containerDimensions) {
+      // Set default dimensions even if container isn't ready yet
+      setContainerDimensions({ width: 800, height: 600 });
+      console.log("[DXF Viewer] Container dimensions set to defaults (container not ready)");
     }
   }, [containerDimensions]);
 
@@ -175,26 +195,44 @@ export const useDxfViewer = ({
   }, [group, containerDimensions]);
 
   const renderer = useMemo(() => {
-    if (!containerDimensions) return null;
-    const renderer = new THREE.WebGLRenderer({
-      antialias: true,
-      powerPreference: "high-performance",
-      precision: "mediump",
-    });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.setSize(containerDimensions.width, containerDimensions.height);
-    return renderer;
+    if (!isMounted || !containerDimensions) return null; // SSR guard
+    
+    // Verify Three.js is available
+    if (typeof THREE === 'undefined' || !THREE.WebGLRenderer) {
+      console.error("[DXF Viewer] Three.js is not available");
+      return null;
+    }
+    
+    try {
+      const renderer = new THREE.WebGLRenderer({
+        antialias: true,
+        powerPreference: "high-performance",
+        precision: "mediump",
+      });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.setSize(containerDimensions.width, containerDimensions.height);
+      
+      return renderer;
+    } catch (error) {
+      console.error("[DXF Viewer] Error creating WebGLRenderer:", error);
+      return null;
+    }
   }, [containerDimensions]);
 
   const scene = useMemo(() => {
-    return setupScene({
+    // Use ref to ensure we're using the correct group instance
+    const currentGroup = groupRef.current || group;
+    
+    const newScene = setupScene({
       backgroundColor,
       showGrid,
       showAxes,
-      group,
+      group: currentGroup,
       gridSize: 100,
       axesSize: 50,
     });
+    
+    return newScene;
   }, [backgroundColor, showGrid, showAxes, group]);
 
   const controls = useMemo(() => {
@@ -219,6 +257,22 @@ export const useDxfViewer = ({
     animationFrameRef.current = requestAnimationFrame(animate);
     if (interactive) {
       controlsRef.current.update();
+      
+      // Force camera to look straight down (2D lock)
+      const camera = cameraRef.current;
+      if (camera.type === 'OrthographicCamera') {
+        const orthoCamera = camera as THREE.OrthographicCamera;
+        // Ensure camera is always positioned above the scene looking down
+        // Lock Z position to be positive (above the scene)
+        if (orthoCamera.position.z < 1) {
+          orthoCamera.position.z = 1;
+        }
+        // Force look at the target (which should be at z=0)
+        const target = controlsRef.current.target;
+        orthoCamera.lookAt(target);
+        // Ensure up vector is correct for 2D view
+        orthoCamera.up.set(0, 1, 0);
+      }
     }
     rendererRef.current.render(sceneRef.current, cameraRef.current);
   }, [interactive]);
@@ -340,20 +394,89 @@ export const useDxfViewer = ({
     };
   }, [renderer, handleMouseDown, handleMouseMove, handleMouseUp, interactive]);
 
-  // Init Effect
+  // Init Effect - wait for all dependencies to be ready
   useEffect(() => {
-    if (!containerRef.current || !camera || !renderer || !controls || !scene)
+    // Check if all dependencies are ready
+    const allReady = containerRef.current && camera && renderer && controls && scene;
+    
+    if (!allReady) {
       return;
+    }
+    
     const container = containerRef.current;
+    if (!container) return;
 
-    rendererRef.current = renderer;
-    sceneRef.current = scene;
-    cameraRef.current = camera;
-    controlsRef.current = controls;
+    // Clear any existing content
+    while (container.firstChild) {
+      container.removeChild(container.firstChild);
+    }
 
-    container.appendChild(renderer.domElement);
-    animate();
-    window.addEventListener("resize", handleResize);
+    try {
+      rendererRef.current = renderer;
+      sceneRef.current = scene;
+      cameraRef.current = camera;
+      controlsRef.current = controls;
+
+      container.appendChild(renderer.domElement);
+      
+      // Force initial render
+      renderer.render(scene, camera);
+      
+      // Find the DXF group (not the grid group)
+      const allGroups = scene.children.filter(c => c.type === 'Group');
+      const gridGroup = allGroups.find(g => g.userData?.isGrid || g.children.some(ch => ch.type === 'GridHelper'));
+      const dxfGroup = allGroups.find(g => g !== gridGroup);
+      
+      // Use the ref to ensure we're checking the correct group instance
+      const currentGroup = groupRef.current || group;
+      
+      // Verify the group we passed is actually in the scene
+      const groupInScene = scene.children.includes(currentGroup);
+      
+      // If group is not in scene, add it!
+      // This can happen due to React's render cycle timing - the fallback fixes it
+      if (!groupInScene && !dxfGroup) {
+        scene.add(currentGroup);
+        renderer.render(scene, camera);
+      }
+      
+      // Re-check entity count after potential fix
+      const finalDxfGroup = scene.children.find(c => c === currentGroup) || 
+                           scene.children.find(c => c.type === 'Group' && c.name === 'dxf-content-group') ||
+                           scene.children.filter(c => c.type === 'Group').find(g => {
+                             const isGrid = g.userData?.isGrid || g.children.some(ch => ch.type === 'GridHelper');
+                             return !isGrid;
+                           });
+      
+      let finalEntityCount = 0;
+      if (finalDxfGroup) {
+        finalEntityCount = finalDxfGroup.children.reduce((sum, layer) => {
+          const layerChildren = layer.children?.length || 0;
+          return sum + layerChildren;
+        }, 0);
+      }
+      
+      // Update the stats with correct entity count
+      if (finalEntityCount > 0) {
+        setStats(prev => ({ ...prev, totalEntities: finalEntityCount }));
+      }
+      
+      animate();
+      window.addEventListener("resize", handleResize);
+      
+      return () => {
+        window.removeEventListener("resize", handleResize);
+        if (animationFrameRef.current) {
+          cancelAnimationFrame(animationFrameRef.current);
+        }
+        // Clean up renderer
+        if (rendererRef.current) {
+          rendererRef.current.dispose();
+        }
+      };
+    } catch (error) {
+      console.error("[DXF Viewer] Error during initialization:", error);
+    }
 
     if (onLoad && isLoaded) {
       // Filter stats to only include numeric values

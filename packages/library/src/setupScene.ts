@@ -74,6 +74,27 @@ export function setupScene({
     scene.add(axesHelper);
   }
 
-  scene.add(group);
+  // Always add the group - it's required
+  if (!group) {
+    console.error("[DXF Viewer] setupScene: group is null/undefined");
+  } else {
+    // Ensure group has a name for identification
+    if (!group.name) {
+      group.name = 'dxf-content-group';
+    }
+    
+    scene.add(group);
+    
+    // Verify it was added - if not, this is a critical error
+    if (!scene.children.includes(group)) {
+      console.error("[DXF Viewer] setupScene: CRITICAL - Group was not added to scene!");
+      // Try again
+      scene.add(group);
+      if (!scene.children.includes(group)) {
+        console.error("[DXF Viewer] setupScene: CRITICAL - Group still not in scene after retry!");
+      }
+    }
+  }
+  
   return scene;
 }

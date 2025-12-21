@@ -1455,9 +1455,6 @@ export function processDxf(
     };
   }
   const parseEndTime = performance.now();
-  console.log(
-    `📄 DXF parsing took: ${(parseEndTime - parseStartTime).toFixed(2)}ms`
-  );
 
   // Only do expensive analysis if we need shape colors
   let outerLoops: Array<{
@@ -1475,7 +1472,6 @@ export function processDxf(
 
   if (showShapeColors) {
     const analysisStartTime = performance.now();
-    console.log("🔍 Starting geometric analysis...");
 
     // Find closed loops using enhanced approach
     const closedLoops = createOrderedLoopsFromConnectivity({ entities });
@@ -1486,11 +1482,6 @@ export function processDxf(
     holes = result.holes;
 
     const analysisEndTime = performance.now();
-    console.log(
-      `⏱️ Geometric analysis took: ${(
-        analysisEndTime - analysisStartTime
-      ).toFixed(2)}ms`
-    );
   } else {
     // Skip shape analysis when colors are disabled for better performance
   }
@@ -1521,7 +1512,6 @@ export function processDxf(
 
   // Process entities
   const entityProcessingStartTime = performance.now();
-  console.log("🏗️ Starting entity processing...");
 
   const stats: Record<string, number | string> = {};
   const layers: Record<string, THREE.Group> = {};
@@ -1698,19 +1688,35 @@ export function processDxf(
             object.userData.radius = circleEntity.radius;
           }
 
+          // Ensure layer exists before adding
+          if (!layers[resolvedLayer]) {
+            layers[resolvedLayer] = new THREE.Group();
+            layers[resolvedLayer].userData = { name: resolvedLayer };
+          }
+          
           layers[resolvedLayer].add(object);
           objects.push(object);
+        } else {
+          console.warn(`[DXF Viewer] createObject returned null for ${entity.type}`);
         }
       } catch (err) {
-        console.error("Failed to process entity:", entity.type, err);
+        console.error(`[DXF Viewer] Failed to process entity ${entity.type}:`, err);
       }
     }
   };
 
   // Start processing
-  entities.forEach((entity) =>
-    instantiateEntity(entity, new THREE.Matrix4(), "0")
-  );
+  let processedCount = 0;
+  let failedCount = 0;
+  entities.forEach((entity) => {
+    try {
+      instantiateEntity(entity, new THREE.Matrix4(), "0");
+      processedCount++;
+    } catch (error) {
+      console.error(`[DXF Viewer] Failed to process entity ${entity.type}:`, error);
+      failedCount++;
+    }
+  });
 
   // Group holes with their containing outer loops for geometric hole creation
   const groupedShapes = groupHolesWithOuterLoops(outerLoops, holes);
@@ -1818,7 +1824,18 @@ export function processDxf(
 
   // Create main group and add layer groups
   const group = new THREE.Group();
-  Object.values(layers).forEach((layerGroup) => group.add(layerGroup));
+  
+  Object.values(layers).forEach((layerGroup) => {
+    if (layerGroup && layerGroup.children.length > 0) {
+      group.add(layerGroup);
+    }
+  });
+  
+  const totalInGroup = group.children.reduce((sum, layer) => sum + (layer.children?.length || 0), 0);
+  
+  if (totalInGroup !== objects.length) {
+    console.error(`[DXF Viewer] MISMATCH: ${objects.length} objects created but only ${totalInGroup} in group!`);
+  }
 
   // Position the DXF content so its left bottom point is at the origin
   const box = new THREE.Box3().setFromObject(group);
@@ -2031,16 +2048,8 @@ export function processDxf(
   }
 
   const entityProcessingEndTime = performance.now();
-  console.log(
-    `🏗️ Entity processing took: ${(
-      entityProcessingEndTime - entityProcessingStartTime
-    ).toFixed(2)}ms`
-  );
-
   const totalEndTime = performance.now();
-  console.log(
-    `⏱️ TOTAL processDxf took: ${(totalEndTime - totalStartTime).toFixed(2)}ms`
-  );
+  // Performance tracking variables kept for potential future use
 
   return {
     group,
