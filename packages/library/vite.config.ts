@@ -5,7 +5,9 @@ import dts from "vite-plugin-dts";
 
 export default defineConfig({
   plugins: [
-    react(),
+    react({
+      jsxRuntime: "automatic",
+    }),
     dts({
       include: ["src"],
       tsconfigPath: "./tsconfig.json",
@@ -20,12 +22,24 @@ export default defineConfig({
       formats: ["es", "umd"],
     },
     rollupOptions: {
-      external: ["react", "react-dom", "three"],
+      external: (id) => {
+        // Externalize React, React DOM, and all their subpaths
+        if (id === "react" || id === "react-dom" || id === "react/jsx-runtime" || id === "react/jsx-dev-runtime") {
+          return true;
+        }
+        // Externalize Three.js and its addons
+        if (id === "three" || id.startsWith("three/")) {
+          return true;
+        }
+        return false;
+      },
       output: {
         globals: {
           react: "React",
           "react-dom": "ReactDOM",
+          "react/jsx-runtime": "react/jsx-runtime",
           three: "THREE",
+          "three/addons/controls/OrbitControls.js": "THREE.OrbitControls",
         },
       },
     },
