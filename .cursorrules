@@ -1,0 +1,15 @@
+# Cursor Rules
+
+Make sure you use as less amout of useEffect as possible. and if you do, make sure it runs as less often as possible except for the ones that are necessary.
+
+Git Commit Message:
+
+> Use CommitLint format for commit messages.
+
+- [fix] - Fix a bug
+- [feat] - Add a new feature
+- [docs] - Update documentation
+- [refactor] - Refactor code
+- [style] - Improve code style
+- [test] - Add or update tests
+- [chore] - Other changes that don't fit into other categories
