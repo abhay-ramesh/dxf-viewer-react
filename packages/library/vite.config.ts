@@ -27,10 +27,7 @@ export default defineConfig({
         if (id === "react" || id === "react-dom" || id === "react/jsx-runtime" || id === "react/jsx-dev-runtime") {
           return true;
         }
-        // Externalize Three.js and its addons
-        if (id === "three" || id.startsWith("three/")) {
-          return true;
-        }
+        // Three.js is now bundled, so don't externalize it
         return false;
       },
       output: {
@@ -38,8 +35,6 @@ export default defineConfig({
           react: "React",
           "react-dom": "ReactDOM",
           "react/jsx-runtime": "react/jsx-runtime",
-          three: "THREE",
-          "three/addons/controls/OrbitControls.js": "THREE.OrbitControls",
         },
       },
     },

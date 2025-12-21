@@ -1,6 +1,6 @@
 {
     "name": "dxf-viewer-react",
-    "version": "0.2.2",
+    "version": "0.2.3",
     "description": "A React component library for viewing DXF files with Three.js",
     "type": "module",
     "repository": {
@@ -50,11 +50,11 @@
     },
     "peerDependencies": {
         "react": ">=18.0.0",
-        "react-dom": ">=18.0.0",
-        "three": ">=0.160.0"
+        "react-dom": ">=18.0.0"
     },
     "dependencies": {
-        "dxf-parser": "^1.1.2"
+        "dxf-parser": "^1.1.2",
+        "three": "^0.160.0"
     },
     "devDependencies": {
         "@eslint/js": "^9.17.0",
