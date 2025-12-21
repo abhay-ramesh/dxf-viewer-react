@@ -48,6 +48,7 @@ export const AdvancedViewer: React.FC<AdvancedViewerProps> = ({ onBack }) => {
     layers,
     toggleLayer,
     exportImage,
+    stats,
   } = useDxfViewer({
     dxfContent,
     showGrid,
@@ -414,6 +415,28 @@ export const AdvancedViewer: React.FC<AdvancedViewerProps> = ({ onBack }) => {
             )}
 
             <div className="prop-group">
+              <div className="prop-group-title">Drawing Info</div>
+              {stats.DXF_UNITS && (
+                <div className="prop-row">
+                  <span className="prop-label">Units</span>
+                  <span className="prop-value">{stats.DXF_UNITS}</span>
+                </div>
+              )}
+              {stats.DXF_UNITS_FORMAT && (
+                <div className="prop-row">
+                  <span className="prop-label">Format</span>
+                  <span className="prop-value">{stats.DXF_UNITS_FORMAT}</span>
+                </div>
+              )}
+              {stats.DXF_MEASUREMENT && (
+                <div className="prop-row">
+                  <span className="prop-label">System</span>
+                  <span className="prop-value">{stats.DXF_MEASUREMENT}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="prop-group">
               <div className="prop-group-title">Statistics</div>
               <div className="prop-row">
                 <span className="prop-label">Total Entities</span>
@@ -435,6 +458,14 @@ export const AdvancedViewer: React.FC<AdvancedViewerProps> = ({ onBack }) => {
                     return (
                       <div className="prop-row" key={stat.type}>
                         <span className="prop-label">Total Closed Loops</span>
+                        <span className="prop-value">{stat.count}</span>
+                      </div>
+                    );
+                  }
+                  if (stat.type === "TOTAL_HOLES") {
+                    return (
+                      <div className="prop-row" key={stat.type}>
+                        <span className="prop-label">Detected Holes</span>
                         <span className="prop-value">{stat.count}</span>
                       </div>
                     );
