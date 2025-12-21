@@ -3,6 +3,25 @@
     "version": "0.2.0",
     "description": "A React component library for viewing DXF files with Three.js",
     "type": "module",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/abhay-ramesh/dxf-viewer-react.git",
+        "directory": "packages/library"
+    },
+    "homepage": "https://github.com/abhay-ramesh/dxf-viewer-react#readme",
+    "bugs": {
+        "url": "https://github.com/abhay-ramesh/dxf-viewer-react/issues"
+    },
+    "keywords": [
+        "dxf",
+        "cad",
+        "react",
+        "three.js",
+        "viewer",
+        "drawing",
+        "autocad"
+    ],
+    "license": "MIT",
     "main": "./dist/dxf-viewer-react.umd.js",
     "module": "./dist/dxf-viewer-react.es.js",
     "types": "./dist/index.d.ts",

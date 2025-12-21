@@ -260,7 +260,7 @@ export const AdvancedViewer: React.FC<AdvancedViewerProps> = ({ onBack }) => {
           icon: <FileText size={14} />,
           onClick: () =>
             window.open(
-              "https://github.com/abhaykvin/dxf-viewer-react",
+              "https://github.com/abhay-ramesh/dxf-viewer-react",
               "_blank"
             ),
         },
