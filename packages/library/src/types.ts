@@ -56,6 +56,8 @@ export interface DxfViewerProps {
   showDebug?: boolean;
   /** Show colored shape fills with geometric holes (default: true) */
   showShapeColors?: boolean;
+  /** Enable interactivity (pan, zoom, select, measure) (default: true) */
+  interactive?: boolean;
   /** Default tool for the viewer */
   defaultTool?: "select" | "pan" | "measure";
   /** Callback when measurement is complete */

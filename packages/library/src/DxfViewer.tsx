@@ -19,6 +19,7 @@ export const DxfViewer: React.FC<DxfViewerProps> = (props) => {
     height = "100%",
     showDebug = false,
     showDebugInfo = false,
+    interactive = true,
   } = props;
 
   return (
@@ -33,79 +34,81 @@ export const DxfViewer: React.FC<DxfViewerProps> = (props) => {
     >
       <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
 
-      {/* Tool buttons */}
-      <div
-        style={{
-          position: "absolute",
-          bottom: "1rem",
-          left: "1rem",
-          display: "flex",
-          gap: "0.5rem",
-          background: "rgba(255, 255, 255, 0.95)",
-          padding: "0.5rem",
-          borderRadius: "8px",
-          boxShadow: "0 2px 8px rgba(0, 0, 0, 0.15)",
-          border: "1px solid rgba(0, 0, 0, 0.1)",
-        }}
-      >
-        <button
-          onClick={() => setCurrentTool("pan")}
+      {/* Tool buttons - only show when interactive */}
+      {interactive && (
+        <div
           style={{
-            padding: "0.5rem 0.75rem",
-            background: currentTool === "pan" ? "#0066cc" : "transparent",
-            color: currentTool === "pan" ? "#ffffff" : "#333333",
-            border: currentTool === "pan" ? "none" : "1px solid #e0e0e0",
-            borderRadius: "6px",
-            cursor: "pointer",
-            fontSize: "0.875rem",
-            fontWeight: "500",
-            transition: "all 0.2s ease",
+            position: "absolute",
+            bottom: "1rem",
+            left: "1rem",
             display: "flex",
-            alignItems: "center",
-            gap: "0.375rem",
+            gap: "0.5rem",
+            background: "rgba(255, 255, 255, 0.95)",
+            padding: "0.5rem",
+            borderRadius: "8px",
+            boxShadow: "0 2px 8px rgba(0, 0, 0, 0.15)",
+            border: "1px solid rgba(0, 0, 0, 0.1)",
           }}
         >
-          Pan
-        </button>
-        <button
-          onClick={() => setCurrentTool("select")}
-          style={{
-            padding: "0.5rem 0.75rem",
-            background: currentTool === "select" ? "#0066cc" : "transparent",
-            color: currentTool === "select" ? "#ffffff" : "#333333",
-            border: currentTool === "select" ? "none" : "1px solid #e0e0e0",
-            borderRadius: "6px",
-            cursor: "pointer",
-            fontSize: "0.875rem",
-            fontWeight: "500",
-            transition: "all 0.2s ease",
-            display: "flex",
-            alignItems: "center",
-            gap: "0.375rem",
-          }}
-        >
-          Select
-        </button>
-        <button
-          onClick={() => setCurrentTool("measure")}
-          style={{
-            padding: "0.5rem 0.75rem",
-            background: currentTool === "measure" ? "#0066cc" : "transparent",
-            color: currentTool === "measure" ? "#ffffff" : "#333333",
-            border: currentTool === "measure" ? "none" : "1px solid #e0e0e0",
-            borderRadius: "6px",
-            cursor: "pointer",
-            fontSize: "0.875rem",
-            fontWeight: "500",
-            transition: "all 0.2s ease",
-            display: "flex",
-            alignItems: "center",
-            gap: "0.375rem",
-          }}
-        >
-          Measure
-        </button>
-      </div>
+          <button
+            onClick={() => setCurrentTool("pan")}
+            style={{
+              padding: "0.5rem 0.75rem",
+              background: currentTool === "pan" ? "#0066cc" : "transparent",
+              color: currentTool === "pan" ? "#ffffff" : "#333333",
+              border: currentTool === "pan" ? "none" : "1px solid #e0e0e0",
+              borderRadius: "6px",
+              cursor: "pointer",
+              fontSize: "0.875rem",
+              fontWeight: "500",
+              transition: "all 0.2s ease",
+              display: "flex",
+              alignItems: "center",
+              gap: "0.375rem",
+            }}
+          >
+            Pan
+          </button>
+          <button
+            onClick={() => setCurrentTool("select")}
+            style={{
+              padding: "0.5rem 0.75rem",
+              background: currentTool === "select" ? "#0066cc" : "transparent",
+              color: currentTool === "select" ? "#ffffff" : "#333333",
+              border: currentTool === "select" ? "none" : "1px solid #e0e0e0",
+              borderRadius: "6px",
+              cursor: "pointer",
+              fontSize: "0.875rem",
+              fontWeight: "500",
+              transition: "all 0.2s ease",
+              display: "flex",
+              alignItems: "center",
+              gap: "0.375rem",
+            }}
+          >
+            Select
+          </button>
+          <button
+            onClick={() => setCurrentTool("measure")}
+            style={{
+              padding: "0.5rem 0.75rem",
+              background: currentTool === "measure" ? "#0066cc" : "transparent",
+              color: currentTool === "measure" ? "#ffffff" : "#333333",
+              border: currentTool === "measure" ? "none" : "1px solid #e0e0e0",
+              borderRadius: "6px",
+              cursor: "pointer",
+              fontSize: "0.875rem",
+              fontWeight: "500",
+              transition: "all 0.2s ease",
+              display: "flex",
+              alignItems: "center",
+              gap: "0.375rem",
+            }}
+          >
+            Measure
+          </button>
+        </div>
+      )}
 
       {/* Measurement Display */}
       {measureText && (

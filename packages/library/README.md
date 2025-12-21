@@ -92,7 +92,7 @@ function MyCustomViewer({ dxfString }) {
 
 ### 3. Plain Viewing Mode (Minimal, PNG-like)
 
-For a clean, minimal viewing experience without grids, axes, or shape fills:
+For a clean, minimal viewing experience without grids, axes, shape fills, or interactivity:
 
 ```tsx
 import { DxfViewer } from 'dxf-viewer-react';
@@ -107,6 +107,7 @@ function PlainViewer({ dxfString }) {
         showGrid={false}
         showAxes={false}
         showShapeColors={false}
+        interactive={false}
         width="100%"
         height="100%"
       />
@@ -171,6 +172,7 @@ function AdvancedViewer({ dxfString }) {
 | `showAxes` | `boolean` | `true` | Whether to show the X/Y axes helper. Set to `false` to hide axes. |
 | `showDebugInfo` | `boolean` | `false` | Show overlay with debug/stats information. |
 | `showShapeColors` | `boolean` | `true` | Whether to fill closed shapes with colors. Set to `false` for line-only rendering. |
+| `interactive` | `boolean` | `true` | Enable interactivity (pan, zoom, select, measure). Set to `false` for static viewing. |
 | `defaultTool` | `"pan" \| "select" \| "measure"` | `"pan"` | The tool active by default on load. |
 | `onLoad` | `(stats: any) => void` | `undefined` | Callback fired when DXF is successfully parsed and loaded. |
 | `onError` | `(error: Error) => void` | `undefined` | Callback fired when DXF parsing fails. |

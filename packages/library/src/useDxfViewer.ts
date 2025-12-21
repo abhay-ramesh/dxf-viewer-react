@@ -24,6 +24,7 @@ export const useDxfViewer = ({
   showGrid = true,
   showAxes = true,
   showShapeColors = true,
+  interactive = true,
   defaultTool = "pan",
   onLoad,
   onError,
@@ -198,8 +199,13 @@ export const useDxfViewer = ({
 
   const controls = useMemo(() => {
     if (!camera || !renderer) return null;
-    return setupControls(camera, renderer, center);
-  }, [camera, renderer, center]);
+    const controls = setupControls(camera, renderer, center);
+    // Disable controls if not interactive
+    if (!interactive && controls) {
+      controls.enabled = false;
+    }
+    return controls;
+  }, [camera, renderer, center, interactive]);
 
   // Animation Loop
   const animate = useCallback(() => {
@@ -211,9 +217,11 @@ export const useDxfViewer = ({
     )
       return;
     animationFrameRef.current = requestAnimationFrame(animate);
-    controlsRef.current.update();
+    if (interactive) {
+      controlsRef.current.update();
+    }
     rendererRef.current.render(sceneRef.current, cameraRef.current);
-  }, []);
+  }, [interactive]);
 
   const handleResize = useCallback(() => {
     if (!containerRef.current || !rendererRef.current || !cameraRef.current)
@@ -251,6 +259,17 @@ export const useDxfViewer = ({
   // Tool Activation/Deactivation
   useEffect(() => {
     if (!scene || !camera || !renderer || !controls || !group) return;
+    
+    if (!interactive) {
+      // Deactivate current tool if interactivity is disabled
+      if (activeTool) {
+        const toolContext = { scene, camera, renderer, controls, group };
+        activeTool.deactivate(toolContext);
+        setActiveTool(null);
+      }
+      return;
+    }
+    
     const toolContext = { scene, camera, renderer, controls, group };
 
     activeTool?.deactivate(toolContext);
@@ -260,7 +279,7 @@ export const useDxfViewer = ({
     setActiveTool(newTool);
 
     return () => newTool.deactivate(toolContext);
-  }, [currentTool, scene, camera, renderer, controls, group, tools]);
+  }, [currentTool, scene, camera, renderer, controls, group, tools, interactive, activeTool]);
 
   // Event Listeners
   const handleMouseDown = useCallback(
@@ -310,7 +329,7 @@ export const useDxfViewer = ({
 
   useEffect(() => {
     const canvas = renderer?.domElement;
-    if (!canvas) return;
+    if (!canvas || !interactive) return; // Don't attach listeners if not interactive
     canvas.addEventListener("mousedown", handleMouseDown);
     canvas.addEventListener("mousemove", handleMouseMove);
     canvas.addEventListener("mouseup", handleMouseUp);
@@ -319,7 +338,7 @@ export const useDxfViewer = ({
       canvas.removeEventListener("mousemove", handleMouseMove);
       canvas.removeEventListener("mouseup", handleMouseUp);
     };
-  }, [renderer, handleMouseDown, handleMouseMove, handleMouseUp]);
+  }, [renderer, handleMouseDown, handleMouseMove, handleMouseUp, interactive]);
 
   // Init Effect
   useEffect(() => {
