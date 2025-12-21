@@ -3,6 +3,7 @@ import DxfParser, {
   ICircleEntity,
   IEllipseEntity,
   IEntity,
+  IInsertEntity,
   ILineEntity,
   ILwpolylineEntity,
   IPointEntity,
@@ -138,27 +139,6 @@ function isCircleEntity(entity: IEntity): entity is ICircleEntity {
   return entity.type === "CIRCLE";
 }
 
-// Type guard for entities with shape property
-function hasShapeProperty(
-  entity: IEntity
-): entity is IEntity & { shape?: boolean | number } {
-  return "shape" in entity;
-}
-
-// Type guard for entities with vertices
-function hasVertices(entity: IEntity): entity is IEntity & {
-  vertices: Array<{ x: number; y: number; z?: number }>;
-} {
-  return "vertices" in entity;
-}
-
-interface EntityDetails {
-  index: number;
-  entity: IEntity;
-  hasShapeFlag: boolean | number | undefined;
-  hasVertices: boolean;
-  vertexCount: number;
-}
 
 export interface ProcessDxfResult {
   group: THREE.Group;
@@ -1453,6 +1433,7 @@ export function processDxf(
   let entities: IEntity[] = [];
   let dxfData: {
     entities?: IEntity[];
+    blocks?: Record<string, { entities: IEntity[]; name: string }>;
     header?: Record<string, unknown>;
     tables?: { layer?: { layers?: Record<string, any> } };
   } | null = null;
@@ -1528,25 +1509,15 @@ export function processDxf(
     });
   }
 
-  // Group entities by type with detailed info
-  const groupedEntities: Record<string, EntityDetails[]> = {};
-  entities.forEach((entity, index) => {
-    if (!groupedEntities[entity.type]) {
-      groupedEntities[entity.type] = [];
-    }
-
-    const hasShapeFlag = hasShapeProperty(entity) ? entity.shape : undefined;
-    const hasVerticesFlag = hasVertices(entity);
-    const vertexCount = hasVerticesFlag ? entity.vertices.length : 0;
-
-    groupedEntities[entity.type].push({
-      index,
-      entity,
-      hasShapeFlag,
-      hasVertices: hasVerticesFlag,
-      vertexCount,
+  // Parse Blocks
+  const blocks: Record<string, IEntity[]> = {};
+  if (dxfData?.blocks) {
+    Object.values(dxfData.blocks).forEach((block: any) => {
+      if (block.entities) {
+        blocks[block.name] = block.entities;
+      }
     });
-  });
+  }
 
   // Process entities
   const entityProcessingStartTime = performance.now();
@@ -1588,132 +1559,158 @@ export function processDxf(
   const objects: THREE.Object3D[] = [];
   const geometryCache = new Map<string, THREE.BufferGeometry>();
 
-  // Process regular entities using type guards
-  entities.forEach((entity) => {
-    try {
-      let object: THREE.Object3D | null = null;
-      // Ensure entity type counts are always numbers
-      const currentCount =
-        typeof stats[entity.type] === "number"
-          ? (stats[entity.type] as number)
-          : 0;
-      stats[entity.type] = currentCount + 1;
+  // Helper function to create base object from entity
+  const createObject = (entity: IEntity): THREE.Object3D | null => {
+    const cacheKey = `${entity.type}-${JSON.stringify(entity)}`;
+    let geometry = geometryCache.get(cacheKey);
+    let object: THREE.Object3D | null = null;
 
-      // Determine entity color
-      // If entity color is 256 (ByLayer), use layer color
-      // Otherwise use entity color (mapping needed) or default
-      // let entityColor =
-      //   material instanceof THREE.LineBasicMaterial
-      //     ? material.color.getHex()
-      //     : 0xffffff;
-
-      // Use layer color if entity doesn't specify one or specifies ByLayer (256)
-      // Note: This logic is simplified; a full implementation would check entity.color
-      const layerName = entity.layer || "0";
-      if (layerTable[layerName]) {
-        // Ideally we'd use the layer color here if we were creating materials per entity
-        // For now we're using the passed 'material' which is global
+    if (!geometry) {
+      switch (entity.type) {
+        case "LINE":
+          if (isLineEntity(entity)) object = processLine(entity, material);
+          break;
+        case "ARC":
+          if (isArcEntity(entity)) object = processArc(entity, material);
+          break;
+        case "CIRCLE":
+          if (isCircleEntity(entity)) object = processCircle(entity, material);
+          break;
+        case "LWPOLYLINE":
+          if (isLwpolylineEntity(entity))
+            object = processPolyline(
+              entity as unknown as IPolylineEntity,
+              material
+            );
+          break;
+        case "POLYLINE":
+          if (isPolylineEntity(entity)) object = processPolyline(entity, material);
+          break;
+        case "SPLINE":
+          if (isSplineEntity(entity)) object = processSpline(entity, material);
+          break;
+        case "ELLIPSE":
+          if (isEllipseEntity(entity)) object = processEllipse(entity, material);
+          break;
+        case "POINT":
+          if (isPointEntity(entity)) object = processPoint(entity, material);
+          break;
+        case "TEXT":
+        case "MTEXT":
+          if (isTextEntity(entity)) object = processText(entity, material);
+          break;
       }
 
-      const cacheKey = `${entity.type}-${JSON.stringify(entity)}`;
-      let geometry = geometryCache.get(cacheKey);
-
-      if (!geometry) {
-        switch (entity.type) {
-          case "LINE":
-            if (isLineEntity(entity)) {
-              object = processLine(entity, material);
-            }
-            break;
-          case "ARC":
-            if (isArcEntity(entity)) {
-              object = processArc(entity, material);
-            }
-            break;
-          case "CIRCLE":
-            if (isCircleEntity(entity)) {
-              object = processCircle(entity, material);
-            }
-            break;
-          case "LWPOLYLINE":
-            if (isLwpolylineEntity(entity)) {
-              // LWPOLYLINE and POLYLINE have similar structure but different TypeScript interfaces
-              // Convert through unknown first to satisfy TypeScript's overlap requirement
-              object = processPolyline(
-                entity as unknown as IPolylineEntity,
-                material
-              );
-            }
-            break;
-          case "POLYLINE":
-            if (isPolylineEntity(entity)) {
-              object = processPolyline(entity, material);
-            }
-            break;
-          case "SPLINE":
-            if (isSplineEntity(entity)) {
-              object = processSpline(entity, material);
-            }
-            break;
-          case "ELLIPSE":
-            if (isEllipseEntity(entity)) {
-              object = processEllipse(entity, material);
-            }
-            break;
-          case "POINT":
-            if (isPointEntity(entity)) {
-              object = processPoint(entity, material);
-            }
-            break;
-          case "TEXT":
-          case "MTEXT":
-            if (isTextEntity(entity)) {
-              object = processText(entity, material);
-            }
-            break;
-        }
-
-        if (object instanceof THREE.Line) {
-          geometry = object.geometry;
-          if (geometry) geometryCache.set(cacheKey, geometry);
-        }
+      if (object instanceof THREE.Line) {
+        geometry = object.geometry;
+        if (geometry) geometryCache.set(cacheKey, geometry);
       }
-
-      if (geometry) {
-        object = new THREE.Line(geometry, material);
-      }
-
-      if (object) {
-        // Add userData to track if this entity is part of a closed loop
-        object.userData = {
-          entityType: entity.type,
-          isClosedLoop: closedLoopEntities.has(entity),
-          loopId: entityLoopMap.get(entity),
-          layer: entity.layer || "0",
-        };
-
-        // Add specific geometry data for snapping
-        if (entity.type === "CIRCLE" || entity.type === "ARC") {
-          const circleEntity = entity as ICircleEntity | IArcEntity;
-          object.userData.center = circleEntity.center;
-          object.userData.radius = circleEntity.radius;
-        }
-
-        // Add to appropriate layer group
-        const layerName = entity.layer || "0";
-        if (!layers[layerName]) {
-          layers[layerName] = new THREE.Group();
-          layers[layerName].userData = { name: layerName };
-          layerTable[layerName] = { color: 0xffffff };
-        }
-        layers[layerName].add(object);
-
-        objects.push(object);
-      }
-    } catch (err) {
-      console.error("Failed to process entity:", entity.type, err);
     }
-  });
+
+    if (geometry && !object) {
+      object = new THREE.Line(geometry, material);
+    }
+
+    return object;
+  };
+
+  // Recursive instantiation function
+  const instantiateEntity = (
+    entity: IEntity,
+    parentMatrix: THREE.Matrix4,
+    parentLayer: string
+  ) => {
+    // Stats
+    const currentCount =
+      typeof stats[entity.type] === "number"
+        ? (stats[entity.type] as number)
+        : 0;
+    stats[entity.type] = currentCount + 1;
+
+    // Determine Layer
+    // If entity is on layer "0", it inherits parentLayer (from Insert), else it uses its own layer
+    let resolvedLayer = entity.layer || "0";
+    if (resolvedLayer === "0") {
+      resolvedLayer = parentLayer;
+    }
+
+    // Ensure layer group exists
+    if (!layers[resolvedLayer]) {
+      layers[resolvedLayer] = new THREE.Group();
+      layers[resolvedLayer].userData = { name: resolvedLayer };
+      layerTable[resolvedLayer] = { color: 0xffffff };
+    }
+
+    if (entity.type === "INSERT") {
+      const insert = entity as IInsertEntity;
+      const blockName = insert.name;
+      if (blocks[blockName]) {
+        const blockEntities = blocks[blockName];
+
+        // Calculate Insert Matrix
+        const position = new THREE.Vector3(
+          insert.position.x,
+          insert.position.y,
+          insert.position.z || 0
+        );
+        const scale = new THREE.Vector3(
+          insert.xScale ?? 1,
+          insert.yScale ?? 1,
+          insert.zScale ?? 1
+        );
+        const rotation = new THREE.Euler(
+          0,
+          0,
+          (insert.rotation || 0) * (Math.PI / 180)
+        );
+
+        const localMatrix = new THREE.Matrix4().compose(
+          position,
+          new THREE.Quaternion().setFromEuler(rotation),
+          scale
+        );
+        const worldMatrix = parentMatrix.clone().multiply(localMatrix);
+
+        // Recurse
+        blockEntities.forEach((child) =>
+          instantiateEntity(child, worldMatrix, resolvedLayer)
+        );
+      }
+    } else {
+      // Geometry Entity
+      try {
+        const object = createObject(entity);
+        if (object) {
+          // Apply Transform
+          object.matrixAutoUpdate = false;
+          object.matrix.copy(parentMatrix);
+
+          // User Data
+          object.userData = {
+            entityType: entity.type,
+            isClosedLoop: closedLoopEntities.has(entity),
+            loopId: entityLoopMap.get(entity),
+            layer: resolvedLayer,
+          };
+          if (entity.type === "CIRCLE" || entity.type === "ARC") {
+            const circleEntity = entity as ICircleEntity | IArcEntity;
+            object.userData.center = circleEntity.center;
+            object.userData.radius = circleEntity.radius;
+          }
+
+          layers[resolvedLayer].add(object);
+          objects.push(object);
+        }
+      } catch (err) {
+        console.error("Failed to process entity:", entity.type, err);
+      }
+    }
+  };
+
+  // Start processing
+  entities.forEach((entity) =>
+    instantiateEntity(entity, new THREE.Matrix4(), "0")
+  );
 
   // Group holes with their containing outer loops for geometric hole creation
   const groupedShapes = groupHolesWithOuterLoops(outerLoops, holes);
@@ -1837,8 +1834,27 @@ export function processDxf(
   let units = "Unknown";
   let unitsFormat = "Unknown";
   let measurement = "Unknown";
+  let version = "Unknown";
 
   if (dxfData?.header) {
+    // Get $ACADVER (DXF Version)
+    const acadVer = dxfData.header.$ACADVER as string;
+    if (acadVer) {
+      const versionMap: Record<string, string> = {
+        AC1006: "R10",
+        AC1009: "R11/R12",
+        AC1012: "R13",
+        AC1014: "R14",
+        AC1015: "2000",
+        AC1018: "2004",
+        AC1021: "2007",
+        AC1024: "2010",
+        AC1027: "2013",
+        AC1032: "2018",
+      };
+      version = versionMap[acadVer] ? `AutoCAD ${versionMap[acadVer]} (${acadVer})` : acadVer;
+    }
+
     // Get $INSUNITS (preferred - actual drawing units)
     const insunits = dxfData.header.$INSUNITS as number;
     if (insunits !== undefined) {
@@ -1976,9 +1992,25 @@ export function processDxf(
     if (measurementFlag !== undefined) {
       measurement = measurementFlag === 0 ? "English" : "Metric";
     }
+
+    // Get Extents
+    if (
+      dxfData.header.$EXTMIN &&
+      dxfData.header.$EXTMAX &&
+      typeof dxfData.header.$EXTMIN === "object" &&
+      typeof dxfData.header.$EXTMAX === "object"
+    ) {
+      const min = dxfData.header.$EXTMIN as { x: number; y: number; z: number };
+      const max = dxfData.header.$EXTMAX as { x: number; y: number; z: number };
+      stats["EXT_MIN_X"] = min.x;
+      stats["EXT_MIN_Y"] = min.y;
+      stats["EXT_MAX_X"] = max.x;
+      stats["EXT_MAX_Y"] = max.y;
+    }
   }
 
   // Update stats
+  stats["DXF_VERSION"] = version;
   stats["DXF_UNITS"] = units;
   stats["DXF_UNITS_FORMAT"] = unitsFormat;
   stats["DXF_MEASUREMENT"] = measurement;
