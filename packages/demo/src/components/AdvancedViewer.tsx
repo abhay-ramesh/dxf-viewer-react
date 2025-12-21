@@ -4,7 +4,11 @@ import {
   ChevronLeft,
   Eye,
   EyeOff,
+  FileText,
+  FolderOpen,
+  Grid,
   Image,
+  Info,
   Layers,
   Maximize2,
   Moon,
@@ -12,9 +16,9 @@ import {
   Move,
   Printer,
   Ruler,
+  Save,
   Settings,
   Sun,
-  Upload,
 } from "lucide-react";
 import React, { useEffect, useState } from "react";
 import "../App.css";
@@ -60,8 +64,22 @@ export const AdvancedViewer: React.FC<AdvancedViewerProps> = ({ onBack }) => {
   });
 
   const [showLayers, setShowLayers] = useState(false);
+  const [activeMenu, setActiveMenu] = useState<string | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
-  // Apply theme to document
+  // Close menus when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (!target.closest(".menu-item-container")) {
+        setActiveMenu(null);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
@@ -158,6 +176,106 @@ export const AdvancedViewer: React.FC<AdvancedViewerProps> = ({ onBack }) => {
     }
   };
 
+  type MenuItem =
+    | { type: "separator" }
+    | {
+        label: string;
+        icon?: React.ReactNode;
+        onClick?: () => void;
+        shortcut?: string;
+        type?: undefined;
+      };
+
+  const menuItems: { label: string; items: MenuItem[] }[] = [
+    {
+      label: "File",
+      items: [
+        {
+          label: "Open...",
+          icon: <FolderOpen size={14} />,
+          onClick: () => fileInputRef.current?.click(),
+          shortcut: "Ctrl+O",
+        },
+        {
+          label: "Save",
+          icon: <Save size={14} />,
+          onClick: () => addToHistory("Save not implemented yet"),
+          shortcut: "Ctrl+S",
+        },
+        { type: "separator" },
+        {
+          label: "Export Image (PNG)",
+          icon: <Image size={14} />,
+          onClick: handleExportImage,
+        },
+        {
+          label: "Print",
+          icon: <Printer size={14} />,
+          onClick: handlePrint,
+          shortcut: "Ctrl+P",
+        },
+      ],
+    },
+    {
+      label: "Edit",
+      items: [
+        {
+          label: "Undo",
+          onClick: () => addToHistory("Undo not implemented"),
+          shortcut: "Ctrl+Z",
+        },
+        {
+          label: "Redo",
+          onClick: () => addToHistory("Redo not implemented"),
+          shortcut: "Ctrl+Y",
+        },
+      ],
+    },
+    {
+      label: "View",
+      items: [
+        {
+          label: showGrid ? "Hide Grid" : "Show Grid",
+          icon: <Grid size={14} />,
+          onClick: () => setShowGrid(!showGrid),
+        },
+        {
+          label: showLayers ? "Hide Layers" : "Show Layers",
+          icon: <Layers size={14} />,
+          onClick: () => setShowLayers(!showLayers),
+        },
+        { type: "separator" },
+        {
+          label: "Zoom Extents",
+          icon: <Maximize2 size={14} />,
+          onClick: () => addToHistory("Zoom Extents not implemented"),
+        },
+      ],
+    },
+    {
+      label: "Help",
+      items: [
+        {
+          label: "Documentation",
+          icon: <FileText size={14} />,
+          onClick: () =>
+            window.open(
+              "https://github.com/abhaykvin/dxf-viewer-react",
+              "_blank"
+            ),
+        },
+        {
+          label: "About",
+          icon: <Info size={14} />,
+          onClick: () =>
+            addToHistory(
+              `DXF Viewer React v${process.env.npm_package_version || "1.0.0"}`
+            ),
+        },
+      ],
+    },
+  ];
+
   return (
     <div className="app-container advanced-mode">
       {/* Top Menu Bar (AutoCAD style) */}
@@ -170,37 +288,59 @@ export const AdvancedViewer: React.FC<AdvancedViewerProps> = ({ onBack }) => {
           <ChevronLeft size={16} /> Home
         </button>
         <div className="menu-separator" />
-        <span className="menu-item">File</span>
-        <span className="menu-item">Edit</span>
-        <span className="menu-item">View</span>
-        <span className="menu-item">Tools</span>
-        <span className="menu-item">Help</span>
-        <div className="menu-file-upload">
-          <label className="menu-upload-label">
-            <Upload size={14} /> Open
-            <input
-              type="file"
-              hidden
-              accept=".dxf"
-              onChange={handleFileUpload}
-            />
-          </label>
-          <button
-            className="menu-btn"
-            onClick={handleExportImage}
-            title="Export as PNG"
-          >
-            <Image size={14} /> Export
-          </button>
-          <button
-            className="menu-btn"
-            onClick={handlePrint}
-            title="Print / PDF"
-          >
-            <Printer size={14} /> Print
-          </button>
+
+        {menuItems.map((menu) => (
+          <div key={menu.label} className="menu-item-container">
+            <div
+              className={`menu-item ${
+                activeMenu === menu.label ? "active" : ""
+              }`}
+              onClick={() =>
+                setActiveMenu(activeMenu === menu.label ? null : menu.label)
+              }
+            >
+              {menu.label}
+            </div>
+            {activeMenu === menu.label && (
+              <div className="menu-dropdown">
+                {menu.items.map((item, index) =>
+                  item.type === "separator" ? (
+                    <div key={index} className="menu-dropdown-separator" />
+                  ) : (
+                    <div
+                      key={index}
+                      className="menu-dropdown-item"
+                      onClick={() => {
+                        item.onClick?.();
+                        setActiveMenu(null);
+                      }}
+                    >
+                      <span className="menu-dropdown-icon">{item.icon}</span>
+                      <span className="menu-dropdown-label">{item.label}</span>
+                      {item.shortcut && (
+                        <span className="menu-dropdown-shortcut">
+                          {item.shortcut}
+                        </span>
+                      )}
+                    </div>
+                  )
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          hidden
+          accept=".dxf"
+          onChange={handleFileUpload}
+        />
+
+        <div className="filename-display" style={{ marginLeft: "auto" }}>
+          {fileName}
         </div>
-        <div className="filename-display">{fileName}</div>
       </div>
 
       <div className="workspace">
@@ -416,6 +556,12 @@ export const AdvancedViewer: React.FC<AdvancedViewerProps> = ({ onBack }) => {
 
             <div className="prop-group">
               <div className="prop-group-title">Drawing Info</div>
+              {stats.DXF_VERSION && (
+                <div className="prop-row">
+                  <span className="prop-label">Version</span>
+                  <span className="prop-value">{stats.DXF_VERSION}</span>
+                </div>
+              )}
               {stats.DXF_UNITS && (
                 <div className="prop-row">
                   <span className="prop-label">Units</span>
@@ -434,6 +580,29 @@ export const AdvancedViewer: React.FC<AdvancedViewerProps> = ({ onBack }) => {
                   <span className="prop-value">{stats.DXF_MEASUREMENT}</span>
                 </div>
               )}
+              {stats.EXT_MIN_X !== undefined &&
+                stats.EXT_MIN_Y !== undefined &&
+                stats.EXT_MAX_X !== undefined &&
+                stats.EXT_MAX_Y !== undefined && (
+                  <div
+                    className="prop-row"
+                    style={{
+                      flexDirection: "column",
+                      alignItems: "flex-start",
+                      gap: "4px",
+                    }}
+                  >
+                    <span className="prop-label">Extents</span>
+                    <span className="prop-value" style={{ fontSize: "10px" }}>
+                      Min: {Number(stats.EXT_MIN_X).toFixed(2)},{" "}
+                      {Number(stats.EXT_MIN_Y).toFixed(2)}
+                    </span>
+                    <span className="prop-value" style={{ fontSize: "10px" }}>
+                      Max: {Number(stats.EXT_MAX_X).toFixed(2)},{" "}
+                      {Number(stats.EXT_MAX_Y).toFixed(2)}
+                    </span>
+                  </div>
+                )}
             </div>
 
             <div className="prop-group">
