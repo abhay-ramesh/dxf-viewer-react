@@ -10,14 +10,16 @@ interface SimpleViewerProps {
 export const SimpleViewer: React.FC<SimpleViewerProps> = ({ onBack }) => {
   const [dxfContent, setDxfContent] = useState<string | null>(null);
 
-  // Use headless hook but with minimal configuration
+  // Use headless hook with plain viewing configuration
+  // All visual options are controllable: grid, axes, colors, shape fills
   const { containerRef, currentTool, setCurrentTool, measureText, error } =
     useDxfViewer({
       dxfContent,
-      showGrid: false, // Cleaner look
-      showAxes: false, // Cleaner look
-      backgroundColor: 0xffffff, // White background for "paper" feel
-      entityColor: 0x333333,
+      showGrid: false, // Disable grid for clean viewing
+      showAxes: false, // Disable axes for minimal interface
+      showShapeColors: false, // Disable shape fills for line-only rendering
+      backgroundColor: 0xffffff, // White background
+      entityColor: 0x333333, // Dark gray lines
       width: "100%",
       height: "100%",
       defaultTool: "pan",

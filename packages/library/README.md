@@ -90,7 +90,32 @@ function MyCustomViewer({ dxfString }) {
 }
 ```
 
-### 3. Extending Functionality (Advanced)
+### 3. Plain Viewing Mode (Minimal, PNG-like)
+
+For a clean, minimal viewing experience without grids, axes, or shape fills:
+
+```tsx
+import { DxfViewer } from 'dxf-viewer-react';
+
+function PlainViewer({ dxfString }) {
+  return (
+    <div style={{ width: '100vw', height: '100vh' }}>
+      <DxfViewer 
+        dxfContent={dxfString}
+        backgroundColor={0xffffff}
+        entityColor={0x000000}
+        showGrid={false}
+        showAxes={false}
+        showShapeColors={false}
+        width="100%"
+        height="100%"
+      />
+    </div>
+  );
+}
+```
+
+### 4. Extending Functionality (Advanced)
 
 The `useDxfViewer` hook exposes internal Three.js instances, allowing you to add custom objects, markers, or event listeners.
 
@@ -140,12 +165,12 @@ function AdvancedViewer({ dxfString }) {
 | `dxfContent` | `string` | **Required** | The raw string content of the DXF file. |
 | `width` | `string \| number` | `"100%"` | Width of the viewer container (Component only). |
 | `height` | `string \| number` | `"100%"` | Height of the viewer container (Component only). |
-| `backgroundColor` | `number` | `0xf0f0f0` | Hex color code for the background scene. |
-| `entityColor` | `number` | `0x0000ff` | Hex color code for the DXF lines/entities. |
-| `showGrid` | `boolean` | `true` | Whether to show the background grid. |
-| `showAxes` | `boolean` | `true` | Whether to show the X/Y axes helper. |
+| `backgroundColor` | `number` | `0xf0f0f0` | Hex color code for the background scene. Set to `0xffffff` for white background. |
+| `entityColor` | `number` | `0x0000ff` | Hex color code for the DXF lines/entities. Set to `0x000000` for black lines. |
+| `showGrid` | `boolean` | `true` | Whether to show the background grid. Set to `false` for clean viewing. |
+| `showAxes` | `boolean` | `true` | Whether to show the X/Y axes helper. Set to `false` to hide axes. |
 | `showDebugInfo` | `boolean` | `false` | Show overlay with debug/stats information. |
-| `showShapeColors` | `boolean` | `true` | Attempt to fill closed shapes with colors. |
+| `showShapeColors` | `boolean` | `true` | Whether to fill closed shapes with colors. Set to `false` for line-only rendering. |
 | `defaultTool` | `"pan" \| "select" \| "measure"` | `"pan"` | The tool active by default on load. |
 | `onLoad` | `(stats: any) => void` | `undefined` | Callback fired when DXF is successfully parsed and loaded. |
 | `onError` | `(error: Error) => void` | `undefined` | Callback fired when DXF parsing fails. |
