@@ -24,6 +24,7 @@ export const useDxfViewer = ({
   showGrid = true,
   showAxes = true,
   showShapeColors = true,
+  shapeColors,
   interactive = true,
   defaultTool = "pan",
   onLoad,
@@ -135,8 +136,8 @@ export const useDxfViewer = ({
     layers: processedLayers,
     layerTable,
   } = useMemo(() => {
-    return processDxf(dxfContent || "", material, showShapeColors);
-  }, [dxfContent, material, showShapeColors]);
+    return processDxf(dxfContent || "", material, showShapeColors, shapeColors);
+  }, [dxfContent, material, showShapeColors, shapeColors]);
 
   // Initial layer state
   useEffect(() => {

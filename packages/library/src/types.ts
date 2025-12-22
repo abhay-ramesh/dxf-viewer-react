@@ -56,6 +56,19 @@ export interface DxfViewerProps {
   showDebug?: boolean;
   /** Show colored shape fills with geometric holes (default: true) */
   showShapeColors?: boolean;
+  /** 
+   * Override colors for filled shapes. Can be:
+   * - A single color (string, number, or THREE.Color) applied to all shapes
+   * - An array of colors that cycles through for each shape
+   * - A function that receives the shape index and returns a color
+   * If not provided, shapes will use auto-generated contrasting colors
+   */
+  shapeColors?: 
+    | string 
+    | number 
+    | THREE.Color 
+    | Array<string | number | THREE.Color> 
+    | ((index: number) => string | number | THREE.Color);
   /** Enable interactivity (pan, zoom, select, measure) (default: true) */
   interactive?: boolean;
   /** Default tool for the viewer */

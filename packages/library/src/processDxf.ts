@@ -150,6 +150,70 @@ export interface ProcessDxfResult {
   dxfHeader?: Record<string, unknown>;
 }
 
+// Helper function to resolve shape color from shapeColors parameter
+function resolveShapeColor(
+  index: number,
+  shapeColors?: 
+    | string 
+    | number 
+    | THREE.Color 
+    | Array<string | number | THREE.Color> 
+    | ((index: number) => string | number | THREE.Color)
+): number {
+  // If shapeColors is provided, use it
+  if (shapeColors !== undefined) {
+    if (typeof shapeColors === 'function') {
+      // Function: call with index
+      const color = shapeColors(index);
+      return normalizeColorToNumber(color);
+    } else if (Array.isArray(shapeColors)) {
+      // Array: cycle through colors
+      const color = shapeColors[index % shapeColors.length];
+      return normalizeColorToNumber(color);
+    } else {
+      // Single color: apply to all shapes
+      return normalizeColorToNumber(shapeColors);
+    }
+  }
+  
+  // Fallback to auto-generated contrasting color
+  return generateContrastingColor(index);
+}
+
+// Normalize color to number (hex format)
+function normalizeColorToNumber(
+  color: string | number | THREE.Color
+): number {
+  if (typeof color === 'number') {
+    return color;
+  }
+  if (typeof color === 'string') {
+    // Handle hex strings like "#ff0000" or "0xff0000"
+    if (color.startsWith('#')) {
+      return parseInt(color.slice(1), 16);
+    }
+    if (color.startsWith('0x') || color.startsWith('0X')) {
+      return parseInt(color.slice(2), 16);
+    }
+    // Try parsing as hex number
+    const parsed = parseInt(color, 16);
+    if (!isNaN(parsed)) {
+      return parsed;
+    }
+    // Fallback: try to create THREE.Color and convert
+    try {
+      const threeColor = new THREE.Color(color);
+      return threeColor.getHex();
+    } catch {
+      return 0x0000ff; // Default blue
+    }
+  }
+  if (color instanceof THREE.Color) {
+    return color.getHex();
+  }
+  return 0x0000ff; // Default blue
+}
+
 // Generate random contrasting colors
 function generateContrastingColor(index: number): number {
   const hue = (index * 137.508) % 360; // Golden angle approximation for good distribution
@@ -1424,7 +1488,13 @@ function groupHolesWithOuterLoops(
 export function processDxf(
   dxfContent: string,
   material: THREE.Material,
-  showShapeColors: boolean = true
+  showShapeColors: boolean = true,
+  shapeColors?: 
+    | string 
+    | number 
+    | THREE.Color 
+    | Array<string | number | THREE.Color> 
+    | ((index: number) => string | number | THREE.Color)
 ): ProcessDxfResult {
   const totalStartTime = performance.now();
 
@@ -1732,8 +1802,8 @@ export function processDxf(
         );
 
         if (shapeWithHolesGeometry) {
-          // Generate contrasting color for this shape
-          const fillColor = generateContrastingColor(index);
+          // Resolve color for this shape (use override if provided, otherwise auto-generate)
+          const fillColor = resolveShapeColor(index, shapeColors);
 
           // Create filled material
           const fillMaterial = new THREE.MeshBasicMaterial({
@@ -1786,8 +1856,10 @@ export function processDxf(
             shapeGroup.outerLoop
           );
           if (fallbackGeometry) {
+            // Resolve color for this shape (use override if provided, otherwise auto-generate)
+            const fallbackColor = resolveShapeColor(index, shapeColors);
             const fallbackMaterial = new THREE.MeshBasicMaterial({
-              color: generateContrastingColor(index),
+              color: fallbackColor,
               opacity: 0.5,
               transparent: true,
               side: THREE.DoubleSide,
