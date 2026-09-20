@@ -7,6 +7,7 @@ import {
   IPolylineEntity,
   ISplineEntity,
 } from "dxf-parser";
+import { PointIndex } from "./PointIndex";
 
 interface Point2D {
   x: number;
@@ -473,6 +474,19 @@ export class DxfAnalyzer {
       return [];
     }
 
+    // Bucket endpoints spatially and by owning entity, so the flood fill
+    // below is a constant-time lookup per endpoint rather than a scan of
+    // every endpoint in the drawing.
+    const index = new PointIndex<Endpoint>(this.TOLERANCE);
+    index.addAll(endpoints);
+
+    const byEntity = new Map<number, Endpoint[]>();
+    for (const endpoint of endpoints) {
+      const bucket = byEntity.get(endpoint.entityIndex);
+      if (bucket) bucket.push(endpoint);
+      else byEntity.set(endpoint.entityIndex, [endpoint]);
+    }
+
     // Build connectivity graph using flood-fill
     const visited = new Set<number>();
     const connectedGroups: number[][] = [];
@@ -480,7 +494,6 @@ export class DxfAnalyzer {
     for (let i = 0; i < entities.length; i++) {
       if (visited.has(i)) continue;
 
-      // Start a new connected group
       const group: number[] = [];
       const toProcess = [i];
 
@@ -491,30 +504,22 @@ export class DxfAnalyzer {
         visited.add(current);
         group.push(current);
 
-        // Find all entities connected to this one
-        const currentEndpoints = endpoints.filter(
-          (ep) => ep.entityIndex === current
-        );
-
-        for (const endpoint of currentEndpoints) {
-          const connectedEntities = endpoints.filter(
-            (ep) =>
-              ep.entityIndex !== current &&
-              !visited.has(ep.entityIndex) &&
-              this.pointsEqual(endpoint, ep)
-          );
-
-          for (const connectedEp of connectedEntities) {
-            if (!visited.has(connectedEp.entityIndex)) {
-              toProcess.push(connectedEp.entityIndex);
+        for (const endpoint of byEntity.get(current) ?? []) {
+          for (const neighbour of index.near(endpoint.x, endpoint.y)) {
+            if (
+              neighbour.entityIndex !== current &&
+              !visited.has(neighbour.entityIndex)
+            ) {
+              toProcess.push(neighbour.entityIndex);
             }
           }
         }
       }
 
       if (group.length >= 1) {
-        // Include single entities that might be closed shapes (like LWPOLYLINE)
-        // Multi-entity groups need at least 3 entities for meaningful loops
+        // Include single entities that might be closed shapes (like
+        // LWPOLYLINE). Multi-entity groups need at least 3 entities for
+        // meaningful loops.
         connectedGroups.push(group);
       }
     }
