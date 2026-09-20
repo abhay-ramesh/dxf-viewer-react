@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { DxfDocument } from "../document/DxfDocument";
 
 export type ToolType = "pan" | "select" | "measure";
 
@@ -9,6 +10,11 @@ export interface ToolContext {
   renderer: THREE.WebGLRenderer;
   controls: OrbitControls;
   group: THREE.Group;
+  /**
+   * The loaded drawing. Tools resolve hits and read geometry facts from here
+   * rather than interrogating the scene graph.
+   */
+  document: DxfDocument;
 }
 
 export interface Tool {

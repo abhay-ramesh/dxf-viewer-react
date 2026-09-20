@@ -48,6 +48,9 @@
     "scripts": {
         "dev": "tsdown --watch",
         "build": "tsdown",
+        "test": "bun test",
+        "test:watch": "bun test --watch",
+        "bench": "bun run scripts/bench.ts",
         "lint": "eslint .",
         "prepublishOnly": "bun run build"
     },

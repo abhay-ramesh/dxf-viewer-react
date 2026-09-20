@@ -1,6 +1,29 @@
 import * as THREE from "three";
+import { DxfDocument } from "../document/DxfDocument";
+import { IndexedEntity } from "../document/types";
 import { EntityInfo } from "../types";
 import { Tool, ToolContext } from "./types";
+
+/**
+ * Project an indexed entity into the flat shape the UI consumes.
+ *
+ * Every value here was computed once at document build time, in the drawing's
+ * own coordinate system.
+ */
+function toEntityInfo(entity: IndexedEntity): EntityInfo {
+  const { derived } = entity;
+  return {
+    type: entity.type,
+    layer: entity.layer,
+    length: derived.length,
+    radius: derived.radius,
+    center: derived.center,
+    startPoint: derived.startPoint,
+    endPoint: derived.endPoint,
+    vertices: derived.vertexCount,
+    area: derived.area,
+  };
+}
 
 export class SelectTool implements Tool {
   type = "select" as const;
@@ -118,95 +141,18 @@ export class SelectTool implements Tool {
     }
   }
 
-  private getEntityInfo(object: THREE.Object3D): EntityInfo {
-    const info: EntityInfo = {
-      type: object.userData.entityType || object.userData.type || "Unknown",
-      layer: object.userData.layer || "0",
-    };
-
-    if (object.userData.outerArea) {
-      info.area = object.userData.outerArea;
-    }
-
-    if (object instanceof THREE.Line || object instanceof THREE.LineSegments) {
-      const geometry = object.geometry;
-      const positions = geometry.getAttribute("position");
-
-      // Calculate length
-      let length = 0;
-      if (positions) {
-        for (let i = 0; i < positions.count - 1; i++) {
-          const point1 = new THREE.Vector3();
-          const point2 = new THREE.Vector3();
-          point1.fromBufferAttribute(positions, i);
-          point2.fromBufferAttribute(positions, i + 1);
-
-          // Only add distance if not a line segment break (for THREE.LineSegments)
-          if (object instanceof THREE.LineSegments) {
-            if (i % 2 === 0) {
-              length += point1.distanceTo(point2);
-            }
-          } else {
-            length += point1.distanceTo(point2);
-          }
-        }
-        info.length = length;
-
-        // Get start and end points
-        if (positions.count > 0) {
-          const start = new THREE.Vector3();
-          start.fromBufferAttribute(positions, 0);
-          object.localToWorld(start);
-          info.startPoint = start;
-
-          const end = new THREE.Vector3();
-          end.fromBufferAttribute(positions, positions.count - 1);
-          object.localToWorld(end);
-          info.endPoint = end;
-        }
-        // Get number of vertices
-        info.vertices = positions.count;
-      }
-
-      // Get center point
-      const center = new THREE.Vector3();
-      geometry.computeBoundingSphere();
-      if (geometry.boundingSphere) {
-        center.copy(geometry.boundingSphere.center);
-        object.localToWorld(center);
-        info.center = center;
-      }
-
-      // Get radius if it's a circle/arc (from userData populated in processDxf)
-      if (object.userData.radius) {
-        info.radius = object.userData.radius;
-      }
-
-      // Override center if available in userData (more accurate for circles/arcs)
-      if (object.userData.center) {
-        const c = new THREE.Vector3(
-          object.userData.center.x,
-          object.userData.center.y,
-          object.userData.center.z || 0
-        );
-        object.localToWorld(c);
-        info.center = c;
-      }
-    } else if (object instanceof THREE.Mesh) {
-      // Handle Shape Meshes (Fills)
-      const geometry = object.geometry;
-      geometry.computeBoundingSphere();
-      if (geometry.boundingSphere) {
-        const center = new THREE.Vector3().copy(geometry.boundingSphere.center);
-        object.localToWorld(center);
-        info.center = center;
-      }
-    }
-
-    return info;
+  private getEntityInfo(
+    object: THREE.Object3D,
+    document: DxfDocument
+  ): EntityInfo | null {
+    const entity = document.fromObject(object);
+    return entity ? toEntityInfo(entity) : null;
   }
 
-  onMouseMove(event: MouseEvent, { camera, renderer, group }: ToolContext) {
+  onMouseMove(
+    event: MouseEvent,
+    { camera, renderer, group, document }: ToolContext
+  ) {
     // Get mouse position in normalized device coordinates
     const rect = renderer.domElement.getBoundingClientRect();
     const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
@@ -246,13 +192,16 @@ export class SelectTool implements Tool {
         }
 
         // Get and display hover info
-        const info = this.getEntityInfo(newHoverObject);
+        const info = this.getEntityInfo(newHoverObject, document);
         this.onHoverUpdate?.(info, event.clientX, event.clientY);
       }
     }
   }
 
-  onMouseDown(event: MouseEvent, { camera, renderer, group }: ToolContext) {
+  onMouseDown(
+    event: MouseEvent,
+    { camera, renderer, group, document }: ToolContext
+  ) {
     // Get mouse position in normalized device coordinates
     const rect = renderer.domElement.getBoundingClientRect();
     const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
@@ -276,10 +225,8 @@ export class SelectTool implements Tool {
       if (newSelection instanceof THREE.Mesh) {
         this.selectObject(newSelection);
 
-        // Use perimeter from userData if available
-        const info = this.getEntityInfo(newSelection);
-        if (newSelection.userData.perimeter) {
-          info.length = newSelection.userData.perimeter;
+        const info = this.getEntityInfo(newSelection, document);
+        if (info) {
           info.type = "Closed Loop"; // Force type for UI
         }
 
@@ -295,8 +242,7 @@ export class SelectTool implements Tool {
         this.selectObject(newSelection);
 
         // Get and display entity info
-        const info = this.getEntityInfo(newSelection);
-        this.onInfoUpdate?.(info);
+        this.onInfoUpdate?.(this.getEntityInfo(newSelection, document));
       }
     }
   }

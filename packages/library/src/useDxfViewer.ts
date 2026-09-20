@@ -128,6 +128,7 @@ export const useDxfViewer = ({
 
   // Process DXF
   const {
+    document,
     group,
     stats: processedStats,
     entities,
@@ -318,14 +319,21 @@ export const useDxfViewer = ({
     if (!interactive) {
       // Deactivate current tool if interactivity is disabled
       if (activeTool) {
-        const toolContext = { scene, camera, renderer, controls, group };
+        const toolContext = {
+          scene,
+          camera,
+          renderer,
+          controls,
+          group,
+          document,
+        };
         activeTool.deactivate(toolContext);
         setActiveTool(null);
       }
       return;
     }
     
-    const toolContext = { scene, camera, renderer, controls, group };
+    const toolContext = { scene, camera, renderer, controls, group, document };
 
     activeTool?.deactivate(toolContext);
 
@@ -334,7 +342,7 @@ export const useDxfViewer = ({
     setActiveTool(newTool);
 
     return () => newTool.deactivate(toolContext);
-  }, [currentTool, scene, camera, renderer, controls, group, tools, interactive, activeTool]);
+  }, [currentTool, scene, camera, renderer, controls, group, document, tools, interactive, activeTool]);
 
   // Event Listeners
   const handleMouseDown = useCallback(
@@ -347,9 +355,10 @@ export const useDxfViewer = ({
         renderer,
         controls,
         group,
+        document,
       });
     },
-    [scene, camera, renderer, controls, group, activeTool]
+    [scene, camera, renderer, controls, group, document, activeTool]
   );
 
   const handleMouseMove = useCallback(
@@ -362,9 +371,10 @@ export const useDxfViewer = ({
         renderer,
         controls,
         group,
+        document,
       });
     },
-    [scene, camera, renderer, controls, group, activeTool]
+    [scene, camera, renderer, controls, group, document, activeTool]
   );
 
   const handleMouseUp = useCallback(
@@ -377,9 +387,10 @@ export const useDxfViewer = ({
         renderer,
         controls,
         group,
+        document,
       });
     },
-    [scene, camera, renderer, controls, group, activeTool]
+    [scene, camera, renderer, controls, group, document, activeTool]
   );
 
   useEffect(() => {
@@ -564,5 +575,7 @@ export const useDxfViewer = ({
     controls: controlsRef.current,
     dxfEntities: entities,
     dxfGroup: group,
+    /** Queryable model of the drawing: identity, derived geometry, lookups. */
+    document,
   };
 };

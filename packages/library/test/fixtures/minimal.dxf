@@ -1,0 +1,208 @@
+  0
+SECTION
+  2
+HEADER
+  9
+$ACADVER
+  1
+AC1021
+  9
+$INSUNITS
+ 70
+     4
+  9
+$MEASUREMENT
+ 70
+     1
+  0
+ENDSEC
+  0
+SECTION
+  2
+TABLES
+  0
+TABLE
+  2
+LAYER
+ 70
+     2
+  0
+LAYER
+  2
+0
+ 70
+     0
+ 62
+     7
+  6
+CONTINUOUS
+  0
+LAYER
+  2
+WALLS
+ 70
+     0
+ 62
+     1
+  6
+CONTINUOUS
+  0
+ENDTAB
+  0
+ENDSEC
+  0
+SECTION
+  2
+BLOCKS
+  0
+BLOCK
+  8
+0
+  2
+MARKER
+ 70
+     0
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+  3
+MARKER
+  1
+
+  0
+LINE
+  8
+0
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 11
+2.0
+ 21
+0.0
+ 31
+0.0
+  0
+ENDBLK
+  8
+0
+  0
+ENDSEC
+  0
+SECTION
+  2
+ENTITIES
+  0
+LINE
+  8
+WALLS
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 11
+10.0
+ 21
+0.0
+ 31
+0.0
+  0
+LINE
+  8
+WALLS
+ 10
+10.0
+ 20
+0.0
+ 30
+0.0
+ 11
+10.0
+ 21
+5.0
+ 31
+0.0
+  0
+CIRCLE
+  8
+0
+ 10
+20.0
+ 20
+20.0
+ 30
+0.0
+ 40
+3.0
+  0
+ARC
+  8
+0
+ 10
+30.0
+ 20
+0.0
+ 30
+0.0
+ 40
+4.0
+ 50
+0.0
+ 51
+90.0
+  0
+LWPOLYLINE
+  8
+WALLS
+ 90
+        4
+ 70
+     1
+ 10
+0.0
+ 20
+10.0
+ 10
+5.0
+ 20
+10.0
+ 10
+5.0
+ 20
+15.0
+ 10
+0.0
+ 20
+15.0
+  0
+INSERT
+  8
+0
+  2
+MARKER
+ 10
+50.0
+ 20
+50.0
+ 30
+0.0
+ 41
+1.0
+ 42
+1.0
+ 43
+1.0
+ 50
+0.0
+  0
+ENDSEC
+  0
+EOF

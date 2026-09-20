@@ -23,6 +23,8 @@ import {
   processText,
 } from "./processors";
 import { DxfAnalyzer } from "./utils/DxfAnalyzer";
+import { DxfDocument } from "./document/DxfDocument";
+import { deriveGeometry, deriveMeshGeometry } from "./document/derive";
 
 // Type guards to safely check entity types and properties
 function isLineEntity(entity: IEntity): entity is ILineEntity {
@@ -141,6 +143,8 @@ function isCircleEntity(entity: IEntity): entity is ICircleEntity {
 
 
 export interface ProcessDxfResult {
+  /** Queryable model of the drawing: identity, derived geometry, lookups. */
+  document: DxfDocument;
   group: THREE.Group;
   stats: Record<string, number | string>;
   entities: IEntity[];
@@ -1515,6 +1519,7 @@ export function processDxf(
     parseError =
       error instanceof Error ? error : new Error("Failed to parse DXF");
     return {
+      document: new DxfDocument(),
       group: new THREE.Group(),
       stats: {},
       entities: [],
@@ -1586,6 +1591,32 @@ export function processDxf(
   const stats: Record<string, number | string> = {};
   const layers: Record<string, THREE.Group> = {};
   const layerTable: Record<string, { color: number }> = {};
+
+  // Identity is assigned here, at the single point where entities become
+  // renderables, so every id maps to exactly one object and vice versa.
+  const document = new DxfDocument();
+  let nextEntityId = 0;
+
+  /**
+   * Fill meshes are generated, not parsed, so they have no source entity —
+   * but they are still selectable, so they still need identity.
+   */
+  const indexFillMesh = (
+    mesh: THREE.Mesh,
+    layer: string,
+    type: string
+  ): void => {
+    const id = `f${nextEntityId++}`;
+    mesh.userData.id = id;
+    document.add({
+      id,
+      type,
+      layer,
+      source: { type, layer } as IEntity,
+      object: mesh,
+      derived: deriveMeshGeometry(mesh),
+    });
+  };
 
   // Initialize layers from DXF tables if available
   if (dxfData?.tables?.layer?.layers) {
@@ -1678,7 +1709,8 @@ export function processDxf(
   const instantiateEntity = (
     entity: IEntity,
     parentMatrix: THREE.Matrix4,
-    parentLayer: string
+    parentLayer: string,
+    parentBlockName?: string
   ) => {
     // Stats
     const currentCount =
@@ -1733,7 +1765,7 @@ export function processDxf(
 
         // Recurse
         blockEntities.forEach((child) =>
-          instantiateEntity(child, worldMatrix, resolvedLayer)
+          instantiateEntity(child, worldMatrix, resolvedLayer, blockName)
         );
       }
     } else {
@@ -1764,6 +1796,23 @@ export function processDxf(
             layers[resolvedLayer].userData = { name: resolvedLayer };
           }
           
+          const id = `e${nextEntityId++}`;
+          object.userData.id = id;
+          document.add({
+            id,
+            type: entity.type,
+            layer: resolvedLayer,
+            source: entity,
+            object,
+            derived: deriveGeometry(
+              object,
+              entity,
+              closedLoopEntities.has(entity)
+            ),
+            loopId: entityLoopMap.get(entity),
+            blockName: parentBlockName,
+          });
+
           layers[resolvedLayer].add(object);
           objects.push(object);
         } else {
@@ -1841,6 +1890,7 @@ export function processDxf(
             layers[layerName].userData = { name: layerName };
           }
           layers[layerName].add(shapeMesh);
+          indexFillMesh(shapeMesh, layerName, "SHAPE_WITH_HOLES");
 
           objects.push(shapeMesh);
         }
@@ -1879,6 +1929,7 @@ export function processDxf(
               layers[layerName].userData = { name: layerName };
             }
             layers[layerName].add(fallbackMesh);
+            indexFillMesh(fallbackMesh, layerName, "SHAPE_FILL");
 
             objects.push(fallbackMesh);
           }
@@ -1915,6 +1966,7 @@ export function processDxf(
     // Translate the group so its left bottom point is at (0, 0, 0) - the grid origin
     // Keep z at 0 so DXF content appears on top of the grid
     group.position.set(-box.min.x, -box.min.y, 0);
+    document.worldOffset.copy(group.position);
   }
 
   geometryCache.clear();
@@ -2124,6 +2176,7 @@ export function processDxf(
   // Performance tracking variables kept for potential future use
 
   return {
+    document,
     group,
     stats,
     entities,
