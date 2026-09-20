@@ -19,16 +19,42 @@ import {
   processLine,
   processPoint,
   processPolyline,
+  processSolid,
   processSpline,
   processText,
 } from "./processors";
 import { DxfAnalyzer } from "./utils/DxfAnalyzer";
+import { censusFromText, parserShortfall } from "./document/census";
+import { DrawingReport } from "./document/DrawingReport";
 import { DxfDocument } from "./document/DxfDocument";
 import { deriveGeometry, deriveMeshGeometry } from "./document/derive";
 import { BatchResult, buildBatches } from "./render/BatchBuilder";
 import { rehydrateLoops } from "./pipeline/prepare";
 import { PreparedDrawing } from "./pipeline/types";
 import { StyleResolver } from "./style/StyleResolver";
+
+/**
+ * Entity types the renderer knows how to draw.
+ *
+ * Kept beside the switch that implements them so the two cannot drift: if a
+ * type is here but unhandled, the report will say "no drawable geometry" when
+ * it should say "not supported".
+ */
+const SUPPORTED_TYPES = new Set([
+  "LINE",
+  "ARC",
+  "CIRCLE",
+  "LWPOLYLINE",
+  "POLYLINE",
+  "SPLINE",
+  "ELLIPSE",
+  "POINT",
+  "TEXT",
+  "MTEXT",
+  "INSERT",
+  "DIMENSION",
+  "SOLID",
+]);
 
 // Type guards to safely check entity types and properties
 function isLineEntity(entity: IEntity): entity is ILineEntity {
@@ -149,6 +175,8 @@ function isCircleEntity(entity: IEntity): entity is ICircleEntity {
 export interface ProcessDxfResult {
   /** Queryable model of the drawing: identity, derived geometry, lookups. */
   document: DxfDocument;
+  /** What could not be drawn, and why. Never null; may be empty. */
+  report: DrawingReport;
   group: THREE.Group;
   stats: Record<string, number | string>;
   entities: IEntity[];
@@ -303,7 +331,8 @@ function createClosedShapeGeometry(
 
     return new THREE.ShapeGeometry(shape);
   } catch (error) {
-    console.warn("Failed to create shape geometry:", error);
+    // Reported through DrawingReport rather than printed: a library has no
+    // business writing to its host's console.
     return null;
   }
 }
@@ -316,9 +345,6 @@ function createClosedShapeFromEntities(loop: {
   try {
     // If we have good vertices from tracing, use them directly
     if (loop.vertices && loop.vertices.length >= 3) {
-      console.log(
-        `Creating shape from ${loop.vertices.length} vertices from traced loop`
-      );
       return createClosedShapeGeometry(loop.vertices);
     }
 
@@ -326,10 +352,6 @@ function createClosedShapeFromEntities(loop: {
     if (loop.entities.length === 0) {
       return null;
     }
-
-    console.log(
-      `Fallback: Creating shape from ${loop.entities.length} entities`
-    );
 
     const shape = new THREE.Shape();
     let hasMoveTo = false;
@@ -408,7 +430,8 @@ function createClosedShapeFromEntities(loop: {
 
     return null;
   } catch (error) {
-    console.warn("Failed to create shape geometry:", error);
+    // Reported through DrawingReport rather than printed: a library has no
+    // business writing to its host's console.
     return null;
   }
 }
@@ -767,11 +790,8 @@ function createRobustSequentialOrder(entities: IEntity[]): {
   const sequentialOrder = findSequentialPath(entities, connectionGraph);
 
   if (!sequentialOrder || sequentialOrder.length < entities.length) {
-    console.warn(
-      `Could not find complete sequential path. Found ${
-        sequentialOrder?.length || 0
-      }/${entities.length} entities`
-    );
+    // A partial path is normal for open or branching chains; the caller falls
+    // back to a simpler ordering. Not worth writing to the host's console.
     return null;
   }
 
@@ -1446,7 +1466,7 @@ function createShapeWithHoles(
 
     return new THREE.ShapeGeometry(mainShape);
   } catch (error) {
-    console.warn("Failed to create shape with holes:", error);
+    // See above: shape failures surface through the report.
     return null;
   }
 }
@@ -1544,6 +1564,7 @@ export function processDxf(
       error instanceof Error ? error : new Error("Failed to parse DXF");
     return {
       document: new DxfDocument(),
+      report: new DrawingReport(),
       group: new THREE.Group(),
       stats: {},
       entities: [],
@@ -1619,6 +1640,7 @@ export function processDxf(
   // Identity is assigned here, at the single point where entities become
   // renderables, so every id maps to exactly one object and vice versa.
   const document = new DxfDocument();
+  const report = new DrawingReport();
   let nextEntityId = 0;
 
   /**
@@ -1720,6 +1742,9 @@ export function processDxf(
         case "POINT":
           if (isPointEntity(entity)) object = processPoint(entity, material);
           break;
+        case "SOLID":
+          object = processSolid(entity as never, material);
+          break;
         case "TEXT":
         case "MTEXT":
           if (isTextEntity(entity)) object = processText(entity, material);
@@ -1767,9 +1792,30 @@ export function processDxf(
       layerTable[resolvedLayer] = { color: 0xffffff };
     }
 
+    // A DIMENSION carries its drawn form in an anonymous block — the
+    // dimension lines, the arrowheads and the measurement text are all in
+    // there. So drawing one is expanding its block, which is the same thing
+    // an INSERT does, at identity transform.
+    if (entity.type === "DIMENSION") {
+      const dimension = entity as IEntity & { block?: string };
+      const blockName = dimension.block;
+      if (!blockName || !blocks[blockName]) {
+        report.record(entity.type, "missing-block", blockName ?? "(none)");
+        return;
+      }
+      blocks[blockName].forEach((child) =>
+        instantiateEntity(child, parentMatrix, resolvedLayer, blockName)
+      );
+      report.recordDrawn();
+      return;
+    }
+
     if (entity.type === "INSERT") {
       const insert = entity as IInsertEntity;
       const blockName = insert.name;
+      if (!blocks[blockName]) {
+        report.record(entity.type, "missing-block", blockName);
+      }
       if (blocks[blockName]) {
         const blockEntities = blocks[blockName];
 
@@ -1821,7 +1867,10 @@ export function processDxf(
           object.matrix.copy(parentMatrix);
 
           // User Data
+          // Merge rather than replace: a processor may already have recorded
+          // something only it knows, such as a text entity's decoded string.
           object.userData = {
+            ...object.userData,
             entityType: entity.type,
             isClosedLoop: closedLoopEntities.has(entity),
             loopId: entityLoopMap.get(entity),
@@ -1854,18 +1903,45 @@ export function processDxf(
             ),
             loopId: entityLoopMap.get(entity),
             blockName: parentBlockName,
+            text: object.userData.text as string | undefined,
           });
 
           layers[resolvedLayer].add(object);
           objects.push(object);
+          report.recordDrawn();
         } else {
-          console.warn(`[DXF Viewer] createObject returned null for ${entity.type}`);
+          // Distinguish "we do not handle this type" from "this instance had
+          // nothing to draw": the first is a gap in the viewer, the second is
+          // a quirk of the file, and a reader deserves to know which.
+          report.record(
+            entity.type,
+            SUPPORTED_TYPES.has(entity.type)
+              ? "empty-geometry"
+              : "unsupported-type"
+          );
         }
       } catch (err) {
-        console.error(`[DXF Viewer] Failed to process entity ${entity.type}:`, err);
+        report.record(
+          entity.type,
+          "failed",
+          err instanceof Error ? err.message : String(err)
+        );
       }
     }
   };
+
+  // What the file declares versus what the parser handed back. Types lost
+  // here never reach the loop below, so they must be accounted for from the
+  // text itself.
+  const parsedCensus: Record<string, number> = {};
+  for (const entity of entities) {
+    parsedCensus[entity.type] = (parsedCensus[entity.type] ?? 0) + 1;
+  }
+  for (const [type, count] of Object.entries(
+    parserShortfall(censusFromText(dxfContent), parsedCensus)
+  )) {
+    for (let i = 0; i < count; i++) report.record(type, "not-parsed");
+  }
 
   // Start processing
   let processedCount = 0;
@@ -1875,7 +1951,11 @@ export function processDxf(
       instantiateEntity(entity, new THREE.Matrix4(), "0");
       processedCount++;
     } catch (error) {
-      console.error(`[DXF Viewer] Failed to process entity ${entity.type}:`, error);
+      report.record(
+        entity.type,
+        "failed",
+        error instanceof Error ? error.message : String(error)
+      );
       failedCount++;
     }
   });
@@ -1918,6 +1998,11 @@ export function processDxf(
               (sum, hole) => sum + hole.area,
               0
             ),
+            // The cutter travels the outline and every hole.
+            holePerimeter: shapeGroup.containedHoles.reduce(
+              (sum, hole) => sum + hole.perimeter,
+              0
+            ),
             layer: shapeGroup.outerLoop.entities[0]?.layer || "0",
           };
 
@@ -1936,9 +2021,10 @@ export function processDxf(
           objects.push(shapeMesh);
         }
       } catch (error) {
-        console.error(
-          `Failed to create shape with holes for group ${index}:`,
-          error
+        report.record(
+          "SHAPE_WITH_HOLES",
+          "failed",
+          error instanceof Error ? error.message : String(error)
         );
 
         // Fallback: create without holes if geometric hole creation fails
@@ -1975,9 +2061,12 @@ export function processDxf(
             objects.push(fallbackMesh);
           }
         } catch (fallbackError) {
-          console.error(
-            `Fallback also failed for group ${index}:`,
-            fallbackError
+          report.record(
+            "SHAPE_FILL",
+            "failed",
+            fallbackError instanceof Error
+              ? fallbackError.message
+              : String(fallbackError)
           );
         }
       }
@@ -2239,6 +2328,7 @@ export function processDxf(
 
   return {
     document,
+    report,
     group,
     stats,
     entities,

@@ -12,6 +12,8 @@ export type {
 
 // Document model: stable entity identity, derived geometry, and lookups.
 export { DxfDocument } from "./document/DxfDocument";
+export { DrawingReport } from "./document/DrawingReport";
+export type { Omission, OmissionReason } from "./document/DrawingReport";
 export type {
   DerivedGeometry,
   EntityId,
@@ -43,6 +45,13 @@ export {
 } from "./core/MeasurementModel";
 export type { Measurement, MeasurementPoint } from "./core/MeasurementModel";
 export { MeasurementRenderer } from "./core/MeasurementRenderer";
+export {
+  captureViewState,
+  encodeViewState,
+  decodeViewState,
+  VIEW_STATE_VERSION,
+} from "./core/ViewState";
+export type { ViewState, CameraState } from "./core/ViewState";
 export { PointIndex } from "./utils/PointIndex";
 export type { ViewerEventName, ViewerEvents } from "./core/events";
 
@@ -69,6 +78,14 @@ export type {
   PreparedLoop,
   PreparedLoops,
 } from "./pipeline/types";
+
+// Text: a single-stroke font, so text batches and snaps like any geometry.
+export { glyphFor, measure, advanceFor, FONT_METRICS } from "./text/strokeFont";
+export type { Glyph } from "./text/strokeFont";
+export { decodeText, decodeMText, decodeEntityText } from "./text/decode";
+export type { DecodedText } from "./text/decode";
+export { layoutText, alignFromAttachment } from "./text/layout";
+export type { TextLayout, TextLayoutOptions } from "./text/layout";
 
 // Tools.
 export { MeasureTool, PanTool, SelectTool } from "./tools";

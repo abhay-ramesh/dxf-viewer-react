@@ -1,7 +1,7 @@
 import {
   DxfViewer,
-  EntityInspector,
   MeasureReadout,
+  PartsPanel,
   StatsOverlay,
   Toolbar,
 } from "dxf-viewer-react";
@@ -128,18 +128,27 @@ export const ComposeViewer: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                   placement="top-left"
                 />
                 <StatsOverlay stats={api.frameStats} position="bottom-right" />
-                <EntityInspector
-                  selection={api.selectedEntityInfo}
-                  selectedCount={api.selectedIds.length}
-                  stats={api.stats}
-                  showDrawingInfo
-                  placement="top-right"
-                />
+
                 <MeasureReadout
                   text={api.measureText}
                   measurements={api.measurements}
                   onRemove={(id) => api.measurementModel?.remove(id)}
                   placement="bottom-left"
+                />
+                {/* The takeoff: areas, hole counts and cut length. */}
+                <PartsPanel
+                  report={api.partsReport}
+                  placement="top-right"
+                  onExport={(csv, filename) => {
+                    const url = URL.createObjectURL(
+                      new Blob([csv], { type: "text/csv" })
+                    );
+                    const link = document.createElement("a");
+                    link.href = url;
+                    link.download = filename;
+                    link.click();
+                    URL.revokeObjectURL(url);
+                  }}
                 />
               </>
             )}

@@ -35,6 +35,30 @@
             "import": "./dist/index.mjs",
             "require": "./dist/index.cjs"
         },
+        "./core": {
+            "types": {
+                "import": "./dist/core.d.mts",
+                "require": "./dist/core.d.cts"
+            },
+            "import": "./dist/core.mjs",
+            "require": "./dist/core.cjs"
+        },
+        "./react": {
+            "types": {
+                "import": "./dist/react.d.mts",
+                "require": "./dist/react.d.cts"
+            },
+            "import": "./dist/react.mjs",
+            "require": "./dist/react.cjs"
+        },
+        "./element": {
+            "types": {
+                "import": "./dist/element.d.mts",
+                "require": "./dist/element.d.cts"
+            },
+            "import": "./dist/element.mjs",
+            "require": "./dist/element.cjs"
+        },
         "./registry/*": {
             "import": "./src/registry/*"
         }
@@ -79,5 +103,12 @@
         "typescript": "~5.6.2",
         "typescript-eslint": "^8.18.2"
     },
-    "peerDependenciesMeta": {}
+    "peerDependenciesMeta": {
+        "react": {
+            "optional": true
+        },
+        "react-dom": {
+            "optional": true
+        }
+    }
 }

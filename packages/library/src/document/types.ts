@@ -45,6 +45,12 @@ export interface DerivedGeometry {
    * rather than near.
    */
   triangles?: Float32Array;
+  /** How many closed loops this outline encloses, for filled areas. */
+  holes?: number;
+  /** Combined area of those holes. */
+  holeArea?: number;
+  /** Combined perimeter of those holes — cut length the tool must travel. */
+  holePerimeter?: number;
 }
 
 export interface IndexedEntity {
@@ -62,6 +68,13 @@ export interface IndexedEntity {
   blockName?: string;
   /** Position in the fill sequence, for palette-style shape colouring. */
   shapeIndex?: number;
+  /**
+   * The decoded string, for TEXT and MTEXT.
+   *
+   * Kept on the entity rather than on the rendered object so it survives
+   * batching — and so the drawing's text is searchable.
+   */
+  text?: string;
   /**
    * Where this entity's vertices live inside a shared batch buffer.
    *

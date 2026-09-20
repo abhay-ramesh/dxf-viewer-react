@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { DxfViewerCore } from "./core/DxfViewerCore";
+import { buildPartsReport, PartsReport } from "./analysis/PartsReport";
+import { ViewState } from "./core/ViewState";
+import { DrawingReport } from "./document/DrawingReport";
 import { Measurement } from "./core/MeasurementModel";
 import { FrameStats } from "./core/PerformanceMonitor";
 import { StyleResolver } from "./style/StyleResolver";
@@ -58,6 +61,7 @@ export const useDxfViewer = ({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [frameStats, setFrameStats] = useState<FrameStats | null>(null);
   const [processed, setProcessed] = useState<ProcessDxfResult | null>(null);
+  const [report, setReport] = useState<DrawingReport | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [progress, setProgress] = useState<LoadProgress | null>(null);
   const [measureText, setMeasureText] = useState<string | null>(null);
@@ -65,6 +69,12 @@ export const useDxfViewer = ({
   const [stats, setStats] = useState<Record<string, number | string>>({});
   const [analyzedData, setAnalyzedData] = useState<AnalyzedData | null>(null);
   const [layers, setLayers] = useState<LayerInfo[]>([]);
+
+  // Which drawing the current view was framed for. Re-processing the same
+  // file — because a colour prop changed — should keep the viewport; opening
+  // a different file should re-frame, or the new drawing lands wherever the
+  // old one happened to be, at the old one's scale.
+  const framedFor = useRef<string | null>(null);
 
   // Callbacks live in a ref so a consumer passing inline arrow functions does
   // not tear down and rebuild the tools on every render.
@@ -191,8 +201,12 @@ export const useDxfViewer = ({
 
         // Re-processing the same file after a styling change should not throw
         // the viewport away; loading a different file should re-frame.
-        core.setDocument(result, core.getDocument().size > 0 && !!dxfContent);
+        const sameDrawing =
+          framedFor.current !== null && framedFor.current === dxfContent;
+        core.setDocument(result, sameDrawing);
+        framedFor.current = dxfContent ?? null;
         setProcessed(result);
+        setReport(result.report);
         setStats(result.stats);
 
         if (result.parseError) {
@@ -290,6 +304,16 @@ export const useDxfViewer = ({
     });
   }, [processed]);
 
+  // A takeoff is derived from the loaded document, so it is computed on
+  // demand rather than kept in state: it costs a pass over the entities and
+  // most consumers never ask for it.
+  const partsReport = useMemo<PartsReport | null>(() => {
+    if (!processed?.document.size) return null;
+    return buildPartsReport(processed.document, {
+      units: String(processed.stats.DXF_UNITS ?? ""),
+    });
+  }, [processed]);
+
   // --- imperative API ------------------------------------------------------
 
   const toggleLayer = useCallback(
@@ -304,6 +328,14 @@ export const useDxfViewer = ({
   );
 
   const fitToContent = useCallback(() => core?.fitToContent(), [core]);
+
+  /** Capture everything the reader can see, for a link or a saved session. */
+  const captureView = useCallback(() => core?.captureView() ?? null, [core]);
+
+  const restoreView = useCallback(
+    (state: ViewState) => core?.restoreView(state),
+    [core]
+  );
 
   return {
     containerRef,
@@ -323,6 +355,10 @@ export const useDxfViewer = ({
     /** Zoom-aware snapping, shared by every precision feature. */
     snapping: core?.snapping ?? null,
     stats,
+    /** What could not be drawn, and why. Null until a drawing is loaded. */
+    report,
+    /** Areas, cut lengths, hole counts and notes — a fabrication takeoff. */
+    partsReport,
     /** Live frame timing and renderer counters, when showStats is on. */
     frameStats,
     analyzedData,
@@ -331,6 +367,8 @@ export const useDxfViewer = ({
     toggleLayer,
     exportImage,
     fitToContent,
+    captureView,
+    restoreView,
     /** The viewer itself. Register a tool, subscribe to an event, drive it. */
     core,
     /** Queryable model of the drawing: identity, derived geometry, lookups. */
