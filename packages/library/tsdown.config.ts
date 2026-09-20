@@ -6,9 +6,9 @@ export default defineConfig({
   dts: true,
   sourcemap: true,
   clean: true,
-  external: ["react", "react-dom", "react/jsx-runtime", "react/jsx-dev-runtime"],
+  external: ["react", "react-dom", "react/jsx-runtime", "react/jsx-dev-runtime", "three", /^three\//],
   // Bundle Three.js and its addons
-  noExternal: ["three", "dxf-parser"],
+  noExternal: ["dxf-parser"],
   treeshake: true,
   minify: false, // Keep readable for debugging
   outDir: "dist",
