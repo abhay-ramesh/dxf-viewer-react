@@ -68,6 +68,12 @@ export const useDxfViewer = ({
   const [analyzedData, setAnalyzedData] = useState<AnalyzedData | null>(null);
   const [layers, setLayers] = useState<LayerInfo[]>([]);
 
+  // Which drawing the current view was framed for. Re-processing the same
+  // file — because a colour prop changed — should keep the viewport; opening
+  // a different file should re-frame, or the new drawing lands wherever the
+  // old one happened to be, at the old one's scale.
+  const framedFor = useRef<string | null>(null);
+
   // Callbacks live in a ref so a consumer passing inline arrow functions does
   // not tear down and rebuild the tools on every render.
   const callbacks = useRef({ onLoad, onError, onMeasureComplete });
@@ -193,7 +199,10 @@ export const useDxfViewer = ({
 
         // Re-processing the same file after a styling change should not throw
         // the viewport away; loading a different file should re-frame.
-        core.setDocument(result, core.getDocument().size > 0 && !!dxfContent);
+        const sameDrawing =
+          framedFor.current !== null && framedFor.current === dxfContent;
+        core.setDocument(result, sameDrawing);
+        framedFor.current = dxfContent ?? null;
         setProcessed(result);
         setReport(result.report);
         setStats(result.stats);

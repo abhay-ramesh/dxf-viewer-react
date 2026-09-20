@@ -73,6 +73,16 @@ function toSegments(points: THREE.Vector3[], closed: boolean): Float32Array {
   return out;
 }
 
+/** Drop the z of already-transformed points, keeping [x, y, x, y, ...]. */
+function flatten2D(points: THREE.Vector3[]): Float32Array {
+  const out = new Float32Array(points.length * 2);
+  points.forEach((point, index) => {
+    out[index * 2] = point.x;
+    out[index * 2 + 1] = point.y;
+  });
+  return out;
+}
+
 /** Disjoint pairs stay pairs; a strip would be wrong to close or chain. */
 function pairsToSegments(points: THREE.Vector3[]): Float32Array {
   const segmentCount = Math.floor(points.length / 2);
@@ -108,6 +118,21 @@ export function deriveGeometry(
     : bbox.getCenter(new THREE.Vector3());
 
   const closed = isClosedLoop || object instanceof THREE.LineLoop;
+
+  // A mesh is a filled area: it has triangles, not an outline to be near.
+  // SOLID arrives here rather than through deriveMeshGeometry because it is
+  // a real parsed entity, not a generated fill.
+  if (object instanceof THREE.Mesh) {
+    return {
+      bbox,
+      center,
+      vertexCount: points.length,
+      closed: true,
+      segments: new Float32Array(0),
+      triangles: flatten2D(points),
+    };
+  }
+
   const derived: DerivedGeometry = {
     bbox,
     center,

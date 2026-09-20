@@ -19,6 +19,7 @@ import {
   processLine,
   processPoint,
   processPolyline,
+  processSolid,
   processSpline,
   processText,
 } from "./processors";
@@ -51,6 +52,8 @@ const SUPPORTED_TYPES = new Set([
   "TEXT",
   "MTEXT",
   "INSERT",
+  "DIMENSION",
+  "SOLID",
 ]);
 
 // Type guards to safely check entity types and properties
@@ -1739,6 +1742,9 @@ export function processDxf(
         case "POINT":
           if (isPointEntity(entity)) object = processPoint(entity, material);
           break;
+        case "SOLID":
+          object = processSolid(entity as never, material);
+          break;
         case "TEXT":
         case "MTEXT":
           if (isTextEntity(entity)) object = processText(entity, material);
@@ -1784,6 +1790,24 @@ export function processDxf(
       layers[resolvedLayer] = new THREE.Group();
       layers[resolvedLayer].userData = { name: resolvedLayer };
       layerTable[resolvedLayer] = { color: 0xffffff };
+    }
+
+    // A DIMENSION carries its drawn form in an anonymous block — the
+    // dimension lines, the arrowheads and the measurement text are all in
+    // there. So drawing one is expanding its block, which is the same thing
+    // an INSERT does, at identity transform.
+    if (entity.type === "DIMENSION") {
+      const dimension = entity as IEntity & { block?: string };
+      const blockName = dimension.block;
+      if (!blockName || !blocks[blockName]) {
+        report.record(entity.type, "missing-block", blockName ?? "(none)");
+        return;
+      }
+      blocks[blockName].forEach((child) =>
+        instantiateEntity(child, parentMatrix, resolvedLayer, blockName)
+      );
+      report.recordDrawn();
+      return;
     }
 
     if (entity.type === "INSERT") {

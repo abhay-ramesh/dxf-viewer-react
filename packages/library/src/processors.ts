@@ -8,6 +8,7 @@ import {
   ISplineEntity,
   ITextEntity,
 } from "dxf-parser";
+import { IEntity } from "dxf-parser";
 import * as THREE from "three";
 import {
   alignFromAttachment,
@@ -380,3 +381,44 @@ function resolveRotation(
   }
   return ((degrees ?? 0) * Math.PI) / 180;
 }
+
+/**
+ * A filled triangle or quadrilateral.
+ *
+ * SOLID is how DXF draws dimension arrowheads, so a drawing with dimensions
+ * needs it even though the entity itself is rarely authored by hand.
+ *
+ * The vertex order is a trap: DXF stores the corners as 1, 2, 4, 3 — the
+ * third and fourth are swapped relative to every other quad format. Taking
+ * them in file order produces a bow-tie.
+ */
+export const processSolid = (
+  entity: IEntity & { points?: Array<{ x: number; y: number; z?: number }> },
+  material: THREE.Material
+): THREE.Object3D | null => {
+  const points = entity.points;
+  if (!points || points.length < 3) return null;
+
+  const [a, b, d, c = d] = points;
+  const triangles: number[] = [
+    a.x, a.y, 0,
+    b.x, b.y, 0,
+    d.x, d.y, 0,
+  ];
+
+  // A fourth distinct corner means a quad, which is two triangles.
+  const isQuad = c && (c.x !== d.x || c.y !== d.y);
+  if (isQuad) {
+    triangles.push(b.x, b.y, 0, c.x, c.y, 0, d.x, d.y, 0);
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute(
+    "position",
+    new THREE.BufferAttribute(new Float32Array(triangles), 3)
+  );
+
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.userData.isSolid = true;
+  return mesh;
+};
