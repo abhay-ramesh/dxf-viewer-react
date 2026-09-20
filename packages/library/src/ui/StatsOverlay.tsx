@@ -1,10 +1,11 @@
 import React from "react";
-import { FrameStats } from "./core/PerformanceMonitor";
+import { FrameStats } from "../core/PerformanceMonitor";
 
 export interface StatsOverlayProps {
   stats: FrameStats | null;
   /** Corner to pin the readout to. */
   position?: "top-left" | "top-right" | "bottom-left" | "bottom-right";
+  className?: string;
 }
 
 /**
@@ -18,6 +19,7 @@ export interface StatsOverlayProps {
 export const StatsOverlay: React.FC<StatsOverlayProps> = ({
   stats,
   position = "top-left",
+  className,
 }) => {
   if (!stats) return null;
 
@@ -32,6 +34,7 @@ export const StatsOverlay: React.FC<StatsOverlayProps> = ({
 
   return (
     <div
+      className={className}
       style={{
         position: "absolute",
         ...vertical,

@@ -1,9 +1,10 @@
 export { DxfViewer } from "./DxfViewer";
-export { StatsOverlay } from "./StatsOverlay";
-export type { StatsOverlayProps } from "./StatsOverlay";
+// Stock UI. Each piece takes data, not the viewer, so it can be replaced.
+export * from "./ui";
 export { useDxfViewer } from "./useDxfViewer";
 export type {
   AnalyzedData,
+  DxfViewerApi,
   DxfViewerProps,
   EntityInfo,
   LayerInfo,

@@ -1,5 +1,8 @@
 import { IEntity } from "dxf-parser";
+import type { ReactNode } from "react";
 import { LoadOptions } from "./pipeline/types";
+import type { ToolbarItem } from "./ui/Toolbar";
+import type { useDxfViewer } from "./useDxfViewer";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
@@ -36,7 +39,29 @@ export interface SnapPoint {
   distance: number;
 }
 
+/** Everything {@link useDxfViewer} returns. The render-prop argument. */
+export type DxfViewerApi = ReturnType<typeof useDxfViewer>;
+
 export interface DxfViewerProps {
+  /** Class applied to the viewer's outer element. */
+  className?: string;
+  /** Styles merged into the viewer's outer element. */
+  style?: React.CSSProperties;
+  /**
+   * Render the stock chrome (toolbar, inspector, readouts).
+   *
+   * Set false for a bare canvas. Ignored when `children` is given.
+   */
+  chrome?: boolean;
+  /** Replace the toolbar's buttons — e.g. after registering your own tool. */
+  toolbar?: ToolbarItem[];
+  /**
+   * Compose your own chrome.
+   *
+   * Receives everything the hook returns, and replaces the stock components
+   * entirely.
+   */
+  children?: (viewer: DxfViewerApi) => ReactNode;
   /** The DXF file content as a string */
   dxfContent: string | null;
   /** Background color of the viewer (default: #f0f0f0) */
