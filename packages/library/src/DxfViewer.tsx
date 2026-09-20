@@ -1,281 +1,124 @@
 import React from "react";
-import { DxfViewerProps } from "./types";
+import { DxfViewerApi, DxfViewerProps } from "./types";
 import { useDxfViewer } from "./useDxfViewer";
+import { EntityInspector } from "./ui/EntityInspector";
+import { ErrorBanner } from "./ui/ErrorBanner";
+import { HoverTooltip } from "./ui/HoverTooltip";
+import { LoadingIndicator } from "./ui/LoadingIndicator";
+import { MeasureReadout } from "./ui/MeasureReadout";
+import { StatsOverlay } from "./ui/StatsOverlay";
+import { Toolbar, ToolbarItem } from "./ui/Toolbar";
 
+const DEFAULT_TOOLS: ToolbarItem[] = [
+  { id: "pan", label: "Pan", title: "Pan (P)" },
+  { id: "select", label: "Select", title: "Select (S)" },
+  { id: "measure", label: "Measure", title: "Measure (M)" },
+];
+
+/**
+ * The viewer with its stock chrome.
+ *
+ * All of it used to live here as inline-styled JSX that a consumer could not
+ * theme, move, or remove, and which shipped in every bundle regardless. Each
+ * piece is now its own exported component that takes data rather than the
+ * viewer, and this file only arranges them.
+ *
+ * Three levels of control:
+ *
+ *   `<DxfViewer dxfContent={dxf} />`            stock chrome
+ *   `<DxfViewer dxfContent={dxf} chrome={false} />`  canvas only
+ *   `<DxfViewer dxfContent={dxf}>{api => …}</DxfViewer>`  compose your own
+ *
+ * and below all three, `useDxfViewer` with no component at all.
+ */
 export const DxfViewer: React.FC<DxfViewerProps> = (props) => {
-  // SSR guard - don't render on server
-  const [isMounted, setIsMounted] = React.useState(false);
-
-  React.useEffect(() => {
-    setIsMounted(true);
-  }, []);
-
+  const api = useDxfViewer(props);
   const {
     containerRef,
     currentTool,
     setCurrentTool,
     hoverInfo,
     selectedEntityInfo,
+    selectedIds,
     measureText,
+    measurements,
+    measurementModel,
     stats,
+    frameStats,
+    isLoading,
+    progress,
     error,
-  } = useDxfViewer(props);
-
-  // Don't render anything on server
-  if (!isMounted) {
-    return (
-      <div
-        style={{
-          width: props.width || "100%",
-          height: props.height || "100%",
-          position: "relative",
-          overflow: "hidden",
-          backgroundColor: "#f0f0f0",
-        }}
-      />
-    );
-  }
+  } = api;
 
   const {
     width = "100%",
     height = "100%",
+    className,
+    style,
+    chrome = true,
+    toolbar,
     showDebug = false,
     showDebugInfo = false,
     interactive = true,
+    children,
   } = props;
+
+  const showDrawingInfo = showDebug || showDebugInfo;
 
   return (
     <div
+      className={className}
       style={{
         width,
         height,
         position: "relative",
         overflow: "hidden",
         backgroundColor: "#f0f0f0",
+        ...style,
       }}
     >
       <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
 
-      {/* Tool buttons - only show when interactive */}
-      {interactive && (
-        <div
-          style={{
-            position: "absolute",
-            bottom: "1rem",
-            left: "1rem",
-            display: "flex",
-            gap: "0.5rem",
-            background: "rgba(255, 255, 255, 0.95)",
-            padding: "0.5rem",
-            borderRadius: "8px",
-            boxShadow: "0 2px 8px rgba(0, 0, 0, 0.15)",
-            border: "1px solid rgba(0, 0, 0, 0.1)",
-          }}
-        >
-          <button
-            onClick={() => setCurrentTool("pan")}
-            style={{
-              padding: "0.5rem 0.75rem",
-              background: currentTool === "pan" ? "#0066cc" : "transparent",
-              color: currentTool === "pan" ? "#ffffff" : "#333333",
-              border: currentTool === "pan" ? "none" : "1px solid #e0e0e0",
-              borderRadius: "6px",
-              cursor: "pointer",
-              fontSize: "0.875rem",
-              fontWeight: "500",
-              transition: "all 0.2s ease",
-              display: "flex",
-              alignItems: "center",
-              gap: "0.375rem",
-            }}
-          >
-            Pan
-          </button>
-          <button
-            onClick={() => setCurrentTool("select")}
-            style={{
-              padding: "0.5rem 0.75rem",
-              background: currentTool === "select" ? "#0066cc" : "transparent",
-              color: currentTool === "select" ? "#ffffff" : "#333333",
-              border: currentTool === "select" ? "none" : "1px solid #e0e0e0",
-              borderRadius: "6px",
-              cursor: "pointer",
-              fontSize: "0.875rem",
-              fontWeight: "500",
-              transition: "all 0.2s ease",
-              display: "flex",
-              alignItems: "center",
-              gap: "0.375rem",
-            }}
-          >
-            Select
-          </button>
-          <button
-            onClick={() => setCurrentTool("measure")}
-            style={{
-              padding: "0.5rem 0.75rem",
-              background: currentTool === "measure" ? "#0066cc" : "transparent",
-              color: currentTool === "measure" ? "#ffffff" : "#333333",
-              border: currentTool === "measure" ? "none" : "1px solid #e0e0e0",
-              borderRadius: "6px",
-              cursor: "pointer",
-              fontSize: "0.875rem",
-              fontWeight: "500",
-              transition: "all 0.2s ease",
-              display: "flex",
-              alignItems: "center",
-              gap: "0.375rem",
-            }}
-          >
-            Measure
-          </button>
-        </div>
-      )}
+      {children
+        ? children(api)
+        : chrome && (
+            <>
+              {interactive && (
+                <Toolbar
+                  items={toolbar ?? DEFAULT_TOOLS}
+                  value={currentTool}
+                  onChange={(id) =>
+                    setCurrentTool(id as "pan" | "select" | "measure")
+                  }
+                />
+              )}
 
-      {/* Measurement Display */}
-      {measureText && (
-        <div
-          style={{
-            position: "absolute",
-            bottom: "1rem",
-            left: "50%",
-            transform: "translateX(-50%)",
-            background: "rgba(0, 0, 0, 0.9)",
-            color: "white",
-            padding: "0.75rem 1.25rem",
-            borderRadius: "8px",
-            fontFamily: "monospace",
-            fontSize: "0.875rem",
-            fontWeight: "500",
-            zIndex: 1000,
-            boxShadow: "0 4px 12px rgba(0, 0, 0, 0.25)",
-            whiteSpace: "nowrap",
-            border: "1px solid rgba(255, 255, 255, 0.2)",
-            backdropFilter: "blur(10px)",
-            display: "flex",
-            alignItems: "center",
-            gap: "0.5rem",
-          }}
-        >
-          {measureText}
-        </div>
-      )}
+              <MeasureReadout
+                text={measureText}
+                measurements={measurements}
+                onRemove={(id) => measurementModel?.remove(id)}
+              />
 
-      {/* Debug Panel */}
-      {(showDebug || showDebugInfo || selectedEntityInfo) && (
-        <div
-          style={{
-            position: "absolute",
-            top: "1rem",
-            right: "1rem",
-            background: "rgba(255, 255, 255, 0.95)",
-            color: "#333333",
-            padding: "1rem",
-            borderRadius: "12px",
-            fontFamily: "system-ui, -apple-system, sans-serif",
-            fontSize: "0.875rem",
-            minWidth: "280px",
-            maxWidth: "380px",
-            maxHeight: "calc(100% - 2rem)",
-            overflowY: "auto",
-            zIndex: 1000,
-            boxShadow: "0 4px 20px rgba(0, 0, 0, 0.15)",
-            border: "1px solid rgba(0, 0, 0, 0.1)",
-            backdropFilter: "blur(10px)",
-          }}
-        >
-          {(showDebug || showDebugInfo) && (
-            <div style={{ marginBottom: "1rem" }}>
-              <div
-                style={{
-                  borderBottom: "2px solid #0066cc",
-                  paddingBottom: "0.5rem",
-                  marginBottom: "0.75rem",
-                  fontWeight: "600",
-                  fontSize: "1rem",
-                  color: "#0066cc",
-                }}
-              >
-                File Info
-              </div>
-              <div style={{ fontSize: "0.8rem" }}>
-                <div>
-                  <strong>Units:</strong> {stats.DXF_UNITS || "Unknown"}
-                </div>
-                {stats.DXF_UNITS_FORMAT && (
-                  <div>
-                    <strong>Format:</strong> {stats.DXF_UNITS_FORMAT}
-                  </div>
-                )}
-              </div>
-            </div>
+              <EntityInspector
+                selection={selectedEntityInfo}
+                selectedCount={selectedIds.length}
+                stats={stats}
+                showDrawingInfo={showDrawingInfo}
+              />
+
+              <HoverTooltip
+                info={hoverInfo?.info ?? null}
+                x={hoverInfo?.x ?? 0}
+                y={hoverInfo?.y ?? 0}
+              />
+
+              <StatsOverlay stats={frameStats} />
+              <LoadingIndicator loading={isLoading} progress={progress} />
+              <ErrorBanner error={error} />
+            </>
           )}
-
-          {selectedEntityInfo && (
-            <div>
-              <div
-                style={{
-                  borderBottom: "2px solid #0066cc",
-                  paddingBottom: "0.5rem",
-                  marginBottom: "0.75rem",
-                  fontWeight: "600",
-                  fontSize: "1rem",
-                  color: "#0066cc",
-                }}
-              >
-                Selection
-              </div>
-              <div style={{ paddingLeft: "0.5rem" }}>
-                <div>Type: {selectedEntityInfo.type}</div>
-                {selectedEntityInfo.length !== undefined && (
-                  <div>Length: {selectedEntityInfo.length.toFixed(2)}</div>
-                )}
-                {selectedEntityInfo.radius !== undefined && (
-                  <div>Radius: {selectedEntityInfo.radius.toFixed(2)}</div>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Hover Info */}
-      {hoverInfo && (
-        <div
-          style={{
-            position: "absolute",
-            top: `${hoverInfo.y + 20}px`,
-            left: `${hoverInfo.x + 20}px`,
-            background: "rgba(0, 0, 0, 0.9)",
-            color: "white",
-            padding: "0.5rem 0.75rem",
-            borderRadius: "6px",
-            fontSize: "0.75rem",
-            fontWeight: "500",
-            pointerEvents: "none",
-            zIndex: 1001,
-          }}
-        >
-          <strong>{hoverInfo.info.type}</strong>
-        </div>
-      )}
-
-      {/* Error Display */}
-      {error && (
-        <div
-          style={{
-            position: "absolute",
-            top: "1rem",
-            left: "1rem",
-            background: "red",
-            color: "white",
-            padding: "1rem",
-            borderRadius: "8px",
-          }}
-        >
-          {error}
-        </div>
-      )}
     </div>
   );
 };
+
+export type { DxfViewerApi };

@@ -23,6 +23,11 @@ import {
   processText,
 } from "./processors";
 import { DxfAnalyzer } from "./utils/DxfAnalyzer";
+import { DxfDocument } from "./document/DxfDocument";
+import { deriveGeometry, deriveMeshGeometry } from "./document/derive";
+import { rehydrateLoops } from "./pipeline/prepare";
+import { PreparedDrawing } from "./pipeline/types";
+import { StyleResolver } from "./style/StyleResolver";
 
 // Type guards to safely check entity types and properties
 function isLineEntity(entity: IEntity): entity is ILineEntity {
@@ -141,11 +146,13 @@ function isCircleEntity(entity: IEntity): entity is ICircleEntity {
 
 
 export interface ProcessDxfResult {
+  /** Queryable model of the drawing: identity, derived geometry, lookups. */
+  document: DxfDocument;
   group: THREE.Group;
   stats: Record<string, number | string>;
   entities: IEntity[];
   layers: Record<string, THREE.Group>;
-  layerTable: Record<string, { color: number }>;
+  layerTable: Record<string, { color: number; colorIndex?: number }>;
   parseError: Error | null;
   dxfHeader?: Record<string, unknown>;
 }
@@ -406,7 +413,7 @@ function createClosedShapeFromEntities(loop: {
 }
 
 // Separate outer loops from holes using improved containment analysis
-function separateOuterLoopsFromHoles(
+export function separateOuterLoopsFromHoles(
   loops: Array<{
     entities: IEntity[];
     vertices: Array<{ x: number; y: number }>;
@@ -667,7 +674,7 @@ function isPointOnLineSegment(
 // Removed convertToTracedLoops function - using DxfAnalyzer results directly
 
 // Find closed loops using enhanced approach: DxfAnalyzer connectivity + proper ordering
-function createOrderedLoopsFromConnectivity({
+export function createOrderedLoopsFromConnectivity({
   entities,
 }: {
   entities: IEntity[];
@@ -1485,17 +1492,25 @@ function groupHolesWithOuterLoops(
   return groupedShapes;
 }
 
+export interface ProcessOptions {
+  /** Decides the colour of every stroke and fill. */
+  style: StyleResolver;
+  /** Build filled meshes for detected closed loops. */
+  showShapeColors?: boolean;
+  /**
+   * Parse and analysis output from {@link prepareDrawing}.
+   *
+   * Supplying it skips both phases here, which is what lets them run
+   * elsewhere — on a worker, or simply earlier.
+   */
+  prepared?: PreparedDrawing;
+}
+
 export function processDxf(
   dxfContent: string,
-  material: THREE.Material,
-  showShapeColors: boolean = true,
-  shapeColors?: 
-    | string 
-    | number 
-    | THREE.Color 
-    | Array<string | number | THREE.Color> 
-    | ((index: number) => string | number | THREE.Color)
+  options: ProcessOptions
 ): ProcessDxfResult {
+  const { style, showShapeColors = true, prepared } = options;
   const totalStartTime = performance.now();
 
   // Parse DXF
@@ -1509,12 +1524,18 @@ export function processDxf(
   } | null = null;
   let parseError: Error | null = null;
   try {
-    dxfData = new DxfParser().parseSync(dxfContent) as any;
+    if (prepared) {
+      if (prepared.parseError) throw new Error(prepared.parseError);
+      dxfData = prepared.data as any;
+    } else {
+      dxfData = new DxfParser().parseSync(dxfContent) as any;
+    }
     entities = dxfData?.entities || [];
   } catch (error) {
     parseError =
       error instanceof Error ? error : new Error("Failed to parse DXF");
     return {
+      document: new DxfDocument(),
       group: new THREE.Group(),
       stats: {},
       entities: [],
@@ -1541,17 +1562,17 @@ export function processDxf(
   }> = [];
 
   if (showShapeColors) {
-    const analysisStartTime = performance.now();
-
-    // Find closed loops using enhanced approach
-    const closedLoops = createOrderedLoopsFromConnectivity({ entities });
-
-    // Separate outer loops from holes
-    const result = separateOuterLoopsFromHoles(closedLoops);
-    outerLoops = result.outerLoops;
-    holes = result.holes;
-
-    const analysisEndTime = performance.now();
+    if (prepared?.loops) {
+      // Already analysed, possibly on another thread. Loops arrive as entity
+      // indices, so they are resolved against this thread's entity array.
+      outerLoops = rehydrateLoops(prepared.loops.outer, entities);
+      holes = rehydrateLoops(prepared.loops.holes, entities);
+    } else {
+      const closedLoops = createOrderedLoopsFromConnectivity({ entities });
+      const result = separateOuterLoopsFromHoles(closedLoops);
+      outerLoops = result.outerLoops;
+      holes = result.holes;
+    }
   } else {
     // Skip shape analysis when colors are disabled for better performance
   }
@@ -1585,7 +1606,44 @@ export function processDxf(
 
   const stats: Record<string, number | string> = {};
   const layers: Record<string, THREE.Group> = {};
-  const layerTable: Record<string, { color: number }> = {};
+  const layerTable: Record<string, { color: number; colorIndex?: number }> = {};
+
+  // Identity is assigned here, at the single point where entities become
+  // renderables, so every id maps to exactly one object and vice versa.
+  const document = new DxfDocument();
+  let nextEntityId = 0;
+
+  /**
+   * Fill meshes are generated, not parsed, so they have no source entity —
+   * but they are still selectable, so they still need identity.
+   */
+  const indexFillMesh = (
+    mesh: THREE.Mesh,
+    layer: string,
+    type: string
+  ): void => {
+    const id = `f${nextEntityId++}`;
+    mesh.userData.id = id;
+    document.add({
+      id,
+      type,
+      layer,
+      source: { type, layer } as IEntity,
+      object: mesh,
+      derived: deriveMeshGeometry(mesh),
+    });
+  };
+
+  // Give the resolver the raw layer table first: it owns colour resolution,
+  // and layerTable below is populated from what it decides.
+  style.setLayerTable(
+    Object.fromEntries(
+      Object.values(dxfData?.tables?.layer?.layers ?? {}).map((layer: any) => [
+        layer.name,
+        { color: layer.color, colorIndex: layer.colorIndex },
+      ])
+    )
+  );
 
   // Initialize layers from DXF tables if available
   if (dxfData?.tables?.layer?.layers) {
@@ -1594,18 +1652,12 @@ export function processDxf(
       layers[layerName] = new THREE.Group();
       layers[layerName].userData = { name: layerName };
 
-      // Parse layer color (AutoCAD color index)
-      let color = 0xffffff;
-      if (layer.color !== undefined) {
-        // Simple mapping for standard colors, full mapping would require a lookup table
-        // This is a simplified implementation
-        const colors = [
-          0x000000, 0xff0000, 0xffff00, 0x00ff00, 0x00ffff, 0x0000ff, 0xff00ff,
-          0xffffff, 0x808080, 0xc0c0c0,
-        ];
-        color = colors[Math.abs(layer.color) % colors.length] || 0xffffff;
-      }
-      layerTable[layerName] = { color };
+      // dxf-parser already resolves the layer's colour to 24-bit RGB; the
+      // ACI index is the fallback when it could not.
+      layerTable[layerName] = {
+        color: style.layerColor(layerName),
+        colorIndex: layer.colorIndex,
+      };
     });
   }
 
@@ -1613,14 +1665,17 @@ export function processDxf(
   if (!layers["0"]) {
     layers["0"] = new THREE.Group();
     layers["0"].userData = { name: "0" };
-    layerTable["0"] = { color: 0xffffff };
+    layerTable["0"] = { color: style.layerColor("0") };
   }
 
   const objects: THREE.Object3D[] = [];
   const geometryCache = new Map<string, THREE.BufferGeometry>();
 
   // Helper function to create base object from entity
-  const createObject = (entity: IEntity): THREE.Object3D | null => {
+  const createObject = (
+    entity: IEntity,
+    material: THREE.Material
+  ): THREE.Object3D | null => {
     const cacheKey = `${entity.type}-${JSON.stringify(entity)}`;
     let geometry = geometryCache.get(cacheKey);
     let object: THREE.Object3D | null = null;
@@ -1678,7 +1733,8 @@ export function processDxf(
   const instantiateEntity = (
     entity: IEntity,
     parentMatrix: THREE.Matrix4,
-    parentLayer: string
+    parentLayer: string,
+    parentBlockName?: string
   ) => {
     // Stats
     const currentCount =
@@ -1733,13 +1789,22 @@ export function processDxf(
 
         // Recurse
         blockEntities.forEach((child) =>
-          instantiateEntity(child, worldMatrix, resolvedLayer)
+          instantiateEntity(child, worldMatrix, resolvedLayer, blockName)
         );
       }
     } else {
       // Geometry Entity
       try {
-        const object = createObject(entity);
+        // Colour is decided once, here, by the resolver — the entity's own
+        // colour if it carries one, otherwise its layer's.
+        const entityStyle = style.resolve({
+          kind: "stroke",
+          type: entity.type,
+          layer: resolvedLayer,
+          colorIndex: (entity as { colorIndex?: number }).colorIndex,
+          rgb: (entity as { color?: number }).color,
+        });
+        const object = createObject(entity, style.lineMaterial(entityStyle));
         if (object) {
           // Apply Transform
           object.matrixAutoUpdate = false;
@@ -1764,6 +1829,23 @@ export function processDxf(
             layers[resolvedLayer].userData = { name: resolvedLayer };
           }
           
+          const id = `e${nextEntityId++}`;
+          object.userData.id = id;
+          document.add({
+            id,
+            type: entity.type,
+            layer: resolvedLayer,
+            source: entity,
+            object,
+            derived: deriveGeometry(
+              object,
+              entity,
+              closedLoopEntities.has(entity)
+            ),
+            loopId: entityLoopMap.get(entity),
+            blockName: parentBlockName,
+          });
+
           layers[resolvedLayer].add(object);
           objects.push(object);
         } else {
@@ -1802,16 +1884,14 @@ export function processDxf(
         );
 
         if (shapeWithHolesGeometry) {
-          // Resolve color for this shape (use override if provided, otherwise auto-generate)
-          const fillColor = resolveShapeColor(index, shapeColors);
-
-          // Create filled material
-          const fillMaterial = new THREE.MeshBasicMaterial({
-            color: fillColor,
-            opacity: 0.8,
-            transparent: true,
-            side: THREE.DoubleSide,
-          });
+          const fillMaterial = style.meshMaterial(
+            style.resolve({
+              kind: "fill",
+              type: "SHAPE_WITH_HOLES",
+              layer: shapeGroup.outerLoop.entities[0]?.layer || "0",
+              shapeIndex: index,
+            })
+          );
 
           // Create mesh with geometric holes
           const shapeMesh = new THREE.Mesh(
@@ -1841,6 +1921,7 @@ export function processDxf(
             layers[layerName].userData = { name: layerName };
           }
           layers[layerName].add(shapeMesh);
+          indexFillMesh(shapeMesh, layerName, "SHAPE_WITH_HOLES");
 
           objects.push(shapeMesh);
         }
@@ -1856,14 +1937,14 @@ export function processDxf(
             shapeGroup.outerLoop
           );
           if (fallbackGeometry) {
-            // Resolve color for this shape (use override if provided, otherwise auto-generate)
-            const fallbackColor = resolveShapeColor(index, shapeColors);
-            const fallbackMaterial = new THREE.MeshBasicMaterial({
-              color: fallbackColor,
-              opacity: 0.5,
-              transparent: true,
-              side: THREE.DoubleSide,
-            });
+            const fallbackMaterial = style.meshMaterial(
+              style.resolve({
+                kind: "fill",
+                type: "SHAPE_FILL",
+                layer: shapeGroup.outerLoop.entities[0]?.layer || "0",
+                shapeIndex: index,
+              })
+            );
             const fallbackMesh = new THREE.Mesh(
               fallbackGeometry,
               fallbackMaterial
@@ -1879,6 +1960,7 @@ export function processDxf(
               layers[layerName].userData = { name: layerName };
             }
             layers[layerName].add(fallbackMesh);
+            indexFillMesh(fallbackMesh, layerName, "SHAPE_FILL");
 
             objects.push(fallbackMesh);
           }
@@ -1915,6 +1997,7 @@ export function processDxf(
     // Translate the group so its left bottom point is at (0, 0, 0) - the grid origin
     // Keep z at 0 so DXF content appears on top of the grid
     group.position.set(-box.min.x, -box.min.y, 0);
+    document.worldOffset.copy(group.position);
   }
 
   geometryCache.clear();
@@ -2124,6 +2207,7 @@ export function processDxf(
   // Performance tracking variables kept for potential future use
 
   return {
+    document,
     group,
     stats,
     entities,

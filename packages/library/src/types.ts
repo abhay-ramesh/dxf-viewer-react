@@ -1,4 +1,8 @@
 import { IEntity } from "dxf-parser";
+import type { ReactNode } from "react";
+import { LoadOptions } from "./pipeline/types";
+import type { ToolbarItem } from "./ui/Toolbar";
+import type { useDxfViewer } from "./useDxfViewer";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
@@ -35,13 +39,47 @@ export interface SnapPoint {
   distance: number;
 }
 
+/** Everything {@link useDxfViewer} returns. The render-prop argument. */
+export type DxfViewerApi = ReturnType<typeof useDxfViewer>;
+
 export interface DxfViewerProps {
+  /** Class applied to the viewer's outer element. */
+  className?: string;
+  /** Styles merged into the viewer's outer element. */
+  style?: React.CSSProperties;
+  /**
+   * Render the stock chrome (toolbar, inspector, readouts).
+   *
+   * Set false for a bare canvas. Ignored when `children` is given.
+   */
+  chrome?: boolean;
+  /** Replace the toolbar's buttons — e.g. after registering your own tool. */
+  toolbar?: ToolbarItem[];
+  /**
+   * Compose your own chrome.
+   *
+   * Receives everything the hook returns, and replaces the stock components
+   * entirely.
+   */
+  children?: (viewer: DxfViewerApi) => ReactNode;
   /** The DXF file content as a string */
   dxfContent: string | null;
   /** Background color of the viewer (default: #f0f0f0) */
   backgroundColor?: string | number | THREE.Color;
-  /** Color of the DXF entities (default: #0000ff) */
+  /**
+   * Force every stroke to one colour.
+   *
+   * Leave unset to honour the drawing's own ByLayer colours, the way a CAD
+   * application does. (Before 0.3 this defaulted to #0000ff, which painted
+   * over whatever the file said.)
+   */
   entityColor?: string | number | THREE.Color;
+  /** Colour for the entity under the cursor (default: #00ff00) */
+  hoverColor?: string | number | THREE.Color;
+  /** Colour for selected entities (default: #ff0000) */
+  selectionColor?: string | number | THREE.Color;
+  /** Override specific layers by name; outranks entityColor. */
+  layerColors?: Record<string, string | number | THREE.Color>;
   /** Width of the viewer (default: 100%) */
   width?: string | number;
   /** Height of the viewer (default: 100%) */
@@ -50,6 +88,25 @@ export interface DxfViewerProps {
   showGrid?: boolean;
   /** Show axes helper (default: true) */
   showAxes?: boolean;
+  /**
+   * Replace the parse-and-analyse step, e.g. with a worker-backed one.
+   *
+   * The value it resolves to is plain, structured-cloneable data, so it can
+   * be produced on another thread and posted back unchanged.
+   */
+  prepare?: LoadOptions["prepare"];
+  /**
+   * How wheel events are read (default: "auto").
+   *
+   * "auto" pans for a trackpad and zooms for a mouse wheel; ctrl or cmd held
+   * always zooms, which is also what a trackpad pinch reports. Force one
+   * behaviour with "zoom" or "pan".
+   */
+  wheelBehavior?: "auto" | "zoom" | "pan";
+  /** Multiplier on zoom travel (default: 1). */
+  zoomSpeed?: number;
+  /** Show a live frame-rate and renderer-counter overlay (default: false) */
+  showStats?: boolean;
   /** Show debug information overlay (default: false) */
   showDebugInfo?: boolean;
   /** Show debug (default: false) */
@@ -84,6 +141,14 @@ export interface DxfViewerProps {
 export interface EntityProcessorProps {
   entity: IEntity;
   material: THREE.Material;
+}
+
+/** Summary of a parsed drawing, independent of how it is rendered. */
+export interface AnalyzedData {
+  totalEntities: number;
+  entityTypes: Array<{ type: string; count: number | string }>;
+  closedLoops: unknown;
+  dxfHeader?: Record<string, unknown>;
 }
 
 export interface EntityStats {
