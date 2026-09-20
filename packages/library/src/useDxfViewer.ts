@@ -47,6 +47,7 @@ export const useDxfViewer = ({
     x: number;
     y: number;
   } | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [measureText, setMeasureText] = useState<string | null>(null);
   const [stats, setStats] = useState<Record<string, number | string>>({});
   const [analyzedData, setAnalyzedData] = useState<unknown>(null);
@@ -98,6 +99,7 @@ export const useDxfViewer = ({
     let instance: DxfViewerCore;
     try {
       instance = new DxfViewerCore(container, {
+        style,
         backgroundColor,
         showGrid,
         showAxes,
@@ -114,13 +116,7 @@ export const useDxfViewer = ({
     instance.registerTool(new PanTool());
     instance.registerTool(
       new SelectTool(
-        (info) => {
-          setSelectedEntityInfo(info);
-          instance.emit("selection:change", {
-            ids: [],
-            primary: info,
-          });
-        },
+        (info) => setSelectedEntityInfo(info),
         (info, x, y) => setHoverInfo(info ? { info, x, y } : null)
       )
     );
@@ -145,8 +141,14 @@ export const useDxfViewer = ({
   // --- props -> core -------------------------------------------------------
 
   useEffect(() => {
-    core?.setOptions({ backgroundColor, showGrid, showAxes, interactive });
-  }, [core, backgroundColor, showGrid, showAxes, interactive]);
+    core?.setOptions({
+      style,
+      backgroundColor,
+      showGrid,
+      showAxes,
+      interactive,
+    });
+  }, [core, style, backgroundColor, showGrid, showAxes, interactive]);
 
   useEffect(() => {
     if (!core) return;
@@ -184,6 +186,9 @@ export const useDxfViewer = ({
     const offLoaded = core.on("document:loaded", ({ stats: numericStats }) => {
       callbacks.current.onLoad?.(numericStats);
     });
+    const offSelection = core.on("selection:change", ({ ids }) =>
+      setSelectedIds(ids)
+    );
     const offLayers = core.on("layers:change", () => {
       setLayers((previous) =>
         previous.map((layer) => ({
@@ -194,6 +199,7 @@ export const useDxfViewer = ({
     });
     return () => {
       offLoaded();
+      offSelection();
       offLayers();
     };
   }, [core]);
@@ -236,6 +242,10 @@ export const useDxfViewer = ({
     setCurrentTool,
     hoverInfo,
     selectedEntityInfo,
+    /** Ids of every selected entity. Multi-select is supported. */
+    selectedIds,
+    /** Select, extend, clear or select-by-layer, programmatically. */
+    selection: core?.selection ?? null,
     measureText,
     stats,
     analyzedData,

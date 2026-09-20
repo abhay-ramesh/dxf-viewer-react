@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { SelectionModel } from "../core/SelectionModel";
 import { DxfDocument } from "../document/DxfDocument";
 
 export type ToolType = "pan" | "select" | "measure";
@@ -15,6 +16,8 @@ export interface ToolContext {
    * rather than interrogating the scene graph.
    */
   document: DxfDocument;
+  /** What is selected and hovered. Tools mutate this rather than materials. */
+  selection: SelectionModel;
 }
 
 export interface Tool {

@@ -4,11 +4,15 @@ import { DxfDocument } from "../document/DxfDocument";
 import { EntityId } from "../document/types";
 import { ProcessDxfResult } from "../processDxf";
 import { setupControls } from "../setupControls";
+import { StyleResolver } from "../style/StyleResolver";
+import { SelectionModel } from "./SelectionModel";
 import { Tool, ToolContext, ToolType } from "../tools/types";
 import { Emitter, ViewerEventName, ViewerEvents } from "./events";
 import { RenderScheduler } from "./RenderScheduler";
 
 export interface CoreOptions {
+  /** Decides colours. Supply the same resolver used to build the document. */
+  style?: StyleResolver;
   backgroundColor?: string | number | THREE.Color;
   showGrid?: boolean;
   showAxes?: boolean;
@@ -63,11 +67,15 @@ export class DxfViewerCore {
   private layerGroups: Record<string, THREE.Group> = {};
   private layerState = new Map<string, LayerState>();
 
+  /** What is selected and hovered, as data rather than as swapped materials. */
+  readonly selection: SelectionModel;
+  private style: StyleResolver;
+
   private readonly tools = new Map<string, Tool>();
   private activeTool: Tool | null = null;
   private releaseContinuous: (() => void) | null = null;
 
-  private options: Required<CoreOptions>;
+  private options: Required<Omit<CoreOptions, "style">>;
   private disposed = false;
 
   constructor(
@@ -75,6 +83,14 @@ export class DxfViewerCore {
     options: CoreOptions = {}
   ) {
     this.options = { ...DEFAULTS, ...stripUndefined(options) };
+    this.style = options.style ?? new StyleResolver();
+    this.selection = new SelectionModel(this.document, this.style, () => {
+      this.emitter.emit("selection:change", {
+        ids: this.selection.ids,
+        primary: null,
+      });
+      this.invalidate();
+    });
 
     const { clientWidth, clientHeight } = container;
     const width = clientWidth || 800;
@@ -175,6 +191,7 @@ export class DxfViewerCore {
     this.contentGroup.name = "dxf-content-group";
     this.document = result.document;
     this.layerGroups = result.layers;
+    this.selection.retarget(this.document, this.style);
     this.scene.add(this.contentGroup);
 
     // Re-apply layer visibility the user had already chosen, and register any
@@ -202,12 +219,22 @@ export class DxfViewerCore {
     return this.document;
   }
 
+  /** Swap the resolver, e.g. when a colour prop changed. */
+  setStyle(style: StyleResolver): void {
+    this.style = style;
+    this.selection.retarget(this.document, style);
+    this.invalidate();
+  }
+
   // ------------------------------------------------------------ appearance
 
   setOptions(options: CoreOptions): void {
     if (this.disposed) return;
-    const next = { ...this.options, ...stripUndefined(options) };
-    const changed = (key: keyof CoreOptions) => next[key] !== this.options[key];
+    const { style: nextStyle, ...visual } = options;
+    if (nextStyle) this.setStyle(nextStyle);
+    const next = { ...this.options, ...stripUndefined(visual) };
+    type VisualKey = keyof Omit<CoreOptions, "style">;
+    const changed = (key: VisualKey) => next[key] !== this.options[key];
 
     const helpersChanged =
       changed("showGrid") ||
@@ -316,6 +343,7 @@ export class DxfViewerCore {
       controls: this.controls,
       group: this.contentGroup,
       document: this.document,
+      selection: this.selection,
     };
   }
 
