@@ -1,6 +1,6 @@
 # ADR 001 — Redesigning the viewer around four primitives
 
-Status: in progress (steps 1–3 landed)
+Status: complete (steps 1–6 landed)
 Date: 2026-09-20
 
 ## Context
@@ -48,10 +48,13 @@ registry, the event bus, and the render scheduler.
 selection and theming, implementing DXF's ByLayer/ByBlock semantics that were
 previously absent.
 
-### 4. An async document pipeline — next
+### 4. An async document pipeline — landed
 
-`processDxf` runs synchronously inside a `useMemo` during render. See
-"Threading" below.
+`loadDocument` splits parse, analyse and build into phases, yields between
+them, reports progress and honours an `AbortSignal`. `prepareDrawing` touches
+neither Three.js nor the DOM and returns only structured-cloneable data, with
+loops referencing entities by index so they survive a clone — which is what
+makes the worker seam real rather than aspirational.
 
 ## Consequences for features
 
@@ -74,10 +77,12 @@ Measured on `packages/demo/public/test.dxf` — 345 KB, 940 entities.
 | --- | --- | --- |
 | Library bundle | 968 KB | **168 KB** (36.6 KB gzipped) |
 | GL draw calls per second, idle | 28,200 | **0** |
-| Draw calls per frame | 977 | 977 (next) |
+| Closed-loop analysis | 88 ms | **25 ms** |
+| `processDxf` total | 148 ms | **~76 ms** |
+| Draw calls per frame | 977 | 977 (batching still outstanding) |
 | Total vertices | 30,894 | 30,894 |
-| `processDxf` | 148 ms | 148 ms (next) |
 | Materials | 1 shared + 1 per fill | shared by appearance |
+| Tests | 0 | 140 |
 
 ### Should we use WebAssembly?
 
@@ -100,31 +105,36 @@ magnitude here; WASM is worth a few percent.** Do the first.
 
 ### Threading
 
-**Yes — a worker, but for the pipeline, not the renderer.**
+**A seam, not a worker — and the measurement is why.**
 
-`processDxf` blocks for 148 ms on a 345 KB file, which extrapolates to roughly
-four seconds on a 10 MB one, with no progress and no cancellation, inside a
-`useMemo` during render.
+The plan assumed parsing dominated. Profiling before building said otherwise:
+parsing 11 ms, geometry construction 28 ms, and closed-loop analysis 88 ms.
+The expensive phase was an `analyzeConnectivity` that scanned every endpoint
+in the drawing against every other inside a flood fill, four times over for
+four tolerance levels.
 
-The design that works:
+Indexing those endpoints spatially took analysis from 88 ms to 25 ms with
+byte-identical output. A worker would have moved the 88 ms off the main
+thread and left it 88 ms.
 
-1. Parse and tessellate in a worker. The pipeline is nearly pure already —
-   string in, geometry out.
-2. Return **transferable `Float32Array`s**, not Three.js objects. Geometry
-   construction on the main thread from a transferred buffer is microseconds;
-   structured-cloning an object graph is not.
-3. Rebuild `BufferGeometry` on the main thread and hand it to the core.
-4. Make the task cancellable, so switching files mid-parse does not leave two
-   parses racing.
+What remains is ~7 ms parsing, ~25 ms analysis and ~45 ms geometry — and
+geometry must stay on the thread that owns the renderer regardless. So the
+pipeline is async, chunked and cancellable, with `loadDocument`'s `prepare`
+option as the seam: `PreparedDrawing` is plain, cloneable data with
+index-based loop references precisely so a worker can produce it. A test
+round-trips it through `structuredClone` to keep that honest.
 
-`OffscreenCanvas` — rendering entirely in a worker — is a later option. It
-complicates picking and controls, and the idle cost is already zero, so it
-solves a problem we no longer have.
+Reach for the worker when a real drawing makes those phases hurt, not before.
+
+`OffscreenCanvas` — rendering entirely in a worker — complicates picking and
+controls, and the idle cost is already zero, so it solves a problem we no
+longer have.
 
 ### The lightweight, performant list, in order of payoff
 
 1. **~~Ship three as a peer dependency~~** — done. 968 KB → 168 KB.
 2. **~~Render on demand~~** — done. 28,200 idle GL calls/sec → 0.
+2b. **~~Index endpoints spatially~~** — done. Analysis 88 ms → 25 ms.
 3. **Batch geometry by layer and material.** 977 draw calls become roughly one
    per layer. This is the single largest frame-time win, and it is *why*
    selection-as-state and the style resolver come first: you cannot swap a
@@ -134,9 +144,9 @@ solves a problem we no longer have.
    `InstancedMesh`, not 500 objects.
 5. **Move parsing to a worker** (above).
 6. **Spatial index for picking.** `raycaster.intersectObjects(children, true)`
-   is linear in entity count on every mouse move. An R-tree over the document
-   bounding boxes makes hover O(log n), and it is the same index snapping
-   needs.
+   is still linear in entity count on every mouse move. `SnapService` already
+   demonstrates the fix for snap points; hit-testing wants the same treatment
+   over entity bounding boxes.
 7. **Avoid per-entity JS objects.** A struct-of-arrays index over typed arrays
    beats 940 heap objects for both memory and cache behaviour.
 8. **LOD and frustum culling** for drawings large enough to need them. Not
@@ -147,9 +157,13 @@ solves a problem we no longer have.
 1. Entity identity and the document index — **landed**
 2. `DxfViewerCore` — **landed**
 3. Style cascade — **landed**
-4. Selection as state, tool registry, event bus — in progress
-5. Async pipeline, then snapping as a service, then measurements as data
-6. Split the UI out of the core
+4. Selection as state, tool registry, event bus — **landed**
+5. Async pipeline, snapping as a service, measurements as data — **landed**
+6. Split the UI out of the core — **landed**
+
+Outstanding, and deliberately so: geometry batching (977 draw calls → roughly
+one per layer), block instancing, and a spatial index for hit-testing. All
+three are unblocked by the work above; none are blocked on design.
 
 Steps 3, 4 and 6 break the public API, which argues for releasing 1–2 as a
 0.2.x and batching the rest into 0.3.0 with a migration note.
