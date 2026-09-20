@@ -32,9 +32,13 @@ export function toEntityInfo(entity: IndexedEntity): EntityInfo {
  * notion of what is selected. It turns a click into a hit and tells the
  * selection model; the model decides what that looks like.
  */
+/** Click tolerance in screen pixels. */
+const PICK_PIXELS = 6;
+
 export class SelectTool implements Tool {
   type = "select" as const;
   private raycaster = new THREE.Raycaster();
+  private plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
 
   constructor(
     private onInfoUpdate?: (info: EntityInfo | null) => void,
@@ -59,17 +63,37 @@ export class SelectTool implements Tool {
     this.onHoverUpdate?.(null, 0, 0);
   }
 
+  /**
+   * What is under the cursor.
+   *
+   * Reads the document's spatial index rather than raycasting the scene: with
+   * entities merged into shared buffers there are no per-entity objects to
+   * raycast, and the index answers in microseconds regardless of how large
+   * the drawing is.
+   */
   private pick(
     event: MouseEvent,
-    { camera, renderer, group, document }: ToolContext
+    context: ToolContext
   ): IndexedEntity | undefined {
+    const { camera, renderer, hitTesting, snapping, viewportHeight } = context;
     const rect = renderer.domElement.getBoundingClientRect();
-    const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-    const y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    const ndc = new THREE.Vector2(
+      ((event.clientX - rect.left) / rect.width) * 2 - 1,
+      -((event.clientY - rect.top) / rect.height) * 2 + 1
+    );
 
-    this.raycaster.setFromCamera(new THREE.Vector2(x, y), camera);
-    const hits = this.raycaster.intersectObjects(group.children, true);
-    return hits.length ? document.fromObject(hits[0].object) : undefined;
+    this.raycaster.setFromCamera(ndc, camera);
+    const onPlane = new THREE.Vector3();
+    this.raycaster.ray.intersectPlane(this.plane, onPlane);
+
+    // A pick tolerance in pixels, so a hairline is as easy to click when
+    // zoomed out as when zoomed in.
+    const tolerance = snapping.worldTolerance(
+      camera,
+      viewportHeight,
+      PICK_PIXELS
+    );
+    return hitTesting.pick(onPlane, tolerance)?.entity;
   }
 
   onMouseMove(event: MouseEvent, context: ToolContext) {

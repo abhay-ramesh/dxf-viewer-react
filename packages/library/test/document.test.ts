@@ -11,8 +11,15 @@ describe("DxfDocument — identity", () => {
     expect(document.size).toBe(9);
   });
 
-  it("round-trips an object back to its entity", async () => {
-    const { document, layers } = run(await loadFixture("minimal.dxf"));
+  it("round-trips an object back to its entity when not batching", async () => {
+    // With batching on this question has no single answer: many entities
+    // share one object, which is why picking moved to HitTester.
+    const { document, layers } = run(
+      await loadFixture("minimal.dxf"),
+      true,
+      {},
+      false
+    );
     const object = layers["WALLS"].children[0];
     const entity = document.fromObject(object);
     expect(entity).toBeDefined();
@@ -21,11 +28,25 @@ describe("DxfDocument — identity", () => {
   });
 
   it("resolves a hit on a nested child up to the owning entity", async () => {
-    const { document, layers } = run(await loadFixture("minimal.dxf"));
+    const { document, layers } = run(
+      await loadFixture("minimal.dxf"),
+      true,
+      {},
+      false
+    );
     const object = layers["WALLS"].children[0];
     const nested = new THREE.Object3D();
     object.add(nested);
     expect(document.fromObject(nested)?.object).toBe(object);
+  });
+
+  it("points every entity at its slice of a batch when batching", async () => {
+    const { document } = run(await loadFixture("minimal.dxf"));
+    for (const entity of document.all()) {
+      expect(entity.batchRange).toBeDefined();
+      expect(entity.batchRange!.count).toBeGreaterThan(0);
+      expect(entity.object).toBe(entity.batchRange!.batch.object);
+    }
   });
 
   it("returns undefined for objects it does not own", async () => {

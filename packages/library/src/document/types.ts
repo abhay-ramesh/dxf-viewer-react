@@ -1,5 +1,6 @@
 import { IEntity } from "dxf-parser";
 import * as THREE from "three";
+import type { BatchRange } from "../render/BatchBuilder";
 
 /**
  * Stable identity for one instantiated entity, unique within a document.
@@ -29,6 +30,21 @@ export interface DerivedGeometry {
   endPoint?: THREE.Vector3;
   vertexCount?: number;
   closed: boolean;
+  /**
+   * The entity flattened into disjoint line segments: [ax, ay, bx, by, ...].
+   *
+   * Hit-testing, snapping and batched rendering all read this rather than the
+   * rendered object, which is what lets the renderer merge entities into
+   * shared buffers without any of them losing track of which entity is which.
+   */
+  segments: Float32Array;
+  /**
+   * A filled area, flattened to triangles: [ax, ay, bx, by, cx, cy, ...].
+   *
+   * Present instead of segments for generated fills, where "hit" means inside
+   * rather than near.
+   */
+  triangles?: Float32Array;
 }
 
 export interface IndexedEntity {
@@ -44,4 +60,13 @@ export interface IndexedEntity {
   loopId?: string;
   /** Present when the entity was instantiated by expanding an INSERT. */
   blockName?: string;
+  /** Position in the fill sequence, for palette-style shape colouring. */
+  shapeIndex?: number;
+  /**
+   * Where this entity's vertices live inside a shared batch buffer.
+   *
+   * Present when batching is on, which is what lets selection recolour one
+   * entity without giving it its own object or material.
+   */
+  batchRange?: BatchRange;
 }

@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { aciToRgb, COLOR_BY_BLOCK, COLOR_BY_LAYER } from "../src/style/aci";
 import { StyleResolver } from "../src/style/StyleResolver";
 import { StyleSubject } from "../src/style/types";
-import { loadDemoFixture, run } from "./helpers";
+import { batchColorOf, loadDemoFixture, run } from "./helpers";
 
 const stroke = (over: Partial<StyleSubject> = {}): StyleSubject => ({
   kind: "stroke",
@@ -245,11 +245,9 @@ describe("StyleResolver — in processDxf", () => {
     const onWhite = document.filter(
       (e) => e.layer === "WHITE" && e.type === "LINE"
     )[0];
-    const material = (onWhite.object as THREE.Line)
-      .material as THREE.LineBasicMaterial;
     // Layer WHITE is 0xffffff in the file. The old code turned it into blue
     // by indexing a 10-colour array with the RGB value.
-    expect(material.color.getHex()).toBe(0xffffff);
+    expect(batchColorOf(onWhite)).toBe(0xffffff);
   });
 
   it("reports true layer colours in the layer table", async () => {
@@ -264,21 +262,19 @@ describe("StyleResolver — in processDxf", () => {
       entityColor: 0x0000ff,
     });
     const line = document.filter((e) => e.type === "LINE")[0];
-    const material = (line.object as THREE.Line)
-      .material as THREE.LineBasicMaterial;
-    expect(material.color.getHex()).toBe(0x0000ff);
+    expect(batchColorOf(line)).toBe(0x0000ff);
   });
 
-  it("shares one material per appearance instead of one per entity", async () => {
-    const { document } = run(await loadDemoFixture());
+  it("bakes colour into vertices, so one material covers the drawing", async () => {
+    const { document, group } = run(await loadDemoFixture());
     const materials = new Set<THREE.Material>();
-    for (const entity of document.all()) {
-      const material = (entity.object as THREE.Line).material;
+    group.traverse((object) => {
+      const material = (object as Partial<THREE.Mesh>).material;
       if (material) materials.add(material as THREE.Material);
-    }
-    // 940 entities across 9 layers, plus fills. Far fewer materials than
-    // entities is the point.
-    expect(materials.size).toBeLessThan(80);
+    });
+    // One per batch: colour now lives in a vertex attribute, so entities of
+    // different colours still share a material.
+    expect(materials.size).toBe(2);
     expect(document.size).toBeGreaterThan(900);
   });
 });
