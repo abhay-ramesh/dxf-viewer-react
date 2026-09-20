@@ -4,7 +4,9 @@ import { DxfViewerCore } from "./core/DxfViewerCore";
 import { FrameStats } from "./core/PerformanceMonitor";
 import { StyleResolver } from "./style/StyleResolver";
 import { DxfDocument } from "./document/DxfDocument";
-import { processDxf } from "./processDxf";
+import { loadDocument } from "./pipeline/loadDocument";
+import { LoadProgress } from "./pipeline/types";
+import { ProcessDxfResult } from "./processDxf";
 import { MeasureTool, PanTool, SelectTool } from "./tools";
 import { AnalyzedData, DxfViewerProps, EntityInfo, LayerInfo } from "./types";
 import { DxfAnalyzer } from "./utils/DxfAnalyzer";
@@ -30,6 +32,7 @@ export const useDxfViewer = ({
   shapeColors,
   interactive = true,
   showStats = false,
+  prepare: prepareOverride,
   defaultTool = "pan",
   onLoad,
   onError,
@@ -51,6 +54,9 @@ export const useDxfViewer = ({
   } | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [frameStats, setFrameStats] = useState<FrameStats | null>(null);
+  const [processed, setProcessed] = useState<ProcessDxfResult | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [progress, setProgress] = useState<LoadProgress | null>(null);
   const [measureText, setMeasureText] = useState<string | null>(null);
   const [stats, setStats] = useState<Record<string, number | string>>({});
   const [analyzedData, setAnalyzedData] = useState<AnalyzedData | null>(null);
@@ -82,13 +88,6 @@ export const useDxfViewer = ({
       selectionColor,
       layerColors,
     ]
-  );
-
-  // Still synchronous, still on the main thread — moving this to a worker is
-  // the next step. Nothing downstream assumes it is synchronous.
-  const processed = useMemo(
-    () => processDxf(dxfContent || "", { style, showShapeColors }),
-    [dxfContent, style, showShapeColors]
   );
 
   useEffect(() => () => style.dispose(), [style]);
@@ -153,28 +152,59 @@ export const useDxfViewer = ({
     });
   }, [core, style, backgroundColor, showGrid, showAxes, interactive]);
 
+  // Loading happens off the render path, one load at a time. Switching files
+  // mid-load cancels the previous one rather than letting two races decide
+  // which result lands last.
   useEffect(() => {
     if (!core) return;
-    // Re-processing the same file after a styling change should not throw the
-    // user's viewport away; loading a different file should re-frame.
-    core.setDocument(processed, core.getDocument().size > 0 && !!dxfContent);
+    const controller = new AbortController();
+    let settled = false;
 
-    setStats(processed.stats);
-    if (processed.parseError) {
-      setError(processed.parseError.message);
-      callbacks.current.onError?.(processed.parseError);
-    } else {
-      setError(null);
-    }
+    setIsLoading(true);
+    loadDocument(dxfContent || "", {
+      style,
+      showShapeColors,
+      signal: controller.signal,
+      onProgress: setProgress,
+      prepare: prepareOverride,
+    })
+      .then((result) => {
+        if (controller.signal.aborted) return;
+        settled = true;
 
-    setLayers(
-      Object.entries(processed.layerTable).map(([name, data]) => ({
-        name,
-        color: data.color,
-        visible: core.isLayerVisible(name),
-      }))
-    );
-  }, [core, processed, dxfContent]);
+        // Re-processing the same file after a styling change should not throw
+        // the viewport away; loading a different file should re-frame.
+        core.setDocument(result, core.getDocument().size > 0 && !!dxfContent);
+        setProcessed(result);
+        setStats(result.stats);
+
+        if (result.parseError) {
+          setError(result.parseError.message);
+          callbacks.current.onError?.(result.parseError);
+        } else {
+          setError(null);
+        }
+
+        setLayers(
+          Object.entries(result.layerTable).map(([name, data]) => ({
+            name,
+            color: data.color,
+            visible: core.isLayerVisible(name),
+          }))
+        );
+      })
+      .catch((failure: Error) => {
+        if (failure.name === "AbortError") return;
+        settled = true;
+        setError(failure.message);
+        callbacks.current.onError?.(failure);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted || settled) setIsLoading(false);
+      });
+
+    return () => controller.abort();
+  }, [core, dxfContent, style, showShapeColors, prepareOverride]);
 
   useEffect(() => setCurrentTool(defaultTool), [defaultTool]);
 
@@ -224,7 +254,7 @@ export const useDxfViewer = ({
 
   // Analysis is independent of rendering; it reads the parsed entities.
   useEffect(() => {
-    if (!dxfContent || !processed.entities.length) {
+    if (!processed?.entities.length) {
       setAnalyzedData(null);
       return;
     }
@@ -237,7 +267,7 @@ export const useDxfViewer = ({
       closedLoops: DxfAnalyzer.findClosedLoops({ entities: processed.entities }),
       dxfHeader: processed.dxfHeader,
     });
-  }, [dxfContent, processed]);
+  }, [processed]);
 
   // --- imperative API ------------------------------------------------------
 
@@ -277,12 +307,16 @@ export const useDxfViewer = ({
     /** The viewer itself. Register a tool, subscribe to an event, drive it. */
     core,
     /** Queryable model of the drawing: identity, derived geometry, lookups. */
-    document: (core?.getDocument() ?? processed.document) as DxfDocument,
+    document: (core?.getDocument() ?? processed?.document ?? null) as DxfDocument | null,
     scene: core?.scene ?? null,
     camera: core?.camera ?? null,
     renderer: core?.renderer ?? null,
     controls: core?.controls ?? null,
-    dxfEntities: processed.entities,
-    dxfGroup: processed.group,
+    dxfEntities: processed?.entities ?? [],
+    dxfGroup: processed?.group ?? null,
+    /** True while a drawing is being parsed and built. */
+    isLoading,
+    /** Which phase the current load is in, and roughly how far along. */
+    progress,
   };
 };

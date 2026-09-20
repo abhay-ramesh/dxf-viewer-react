@@ -1,4 +1,5 @@
 import { IEntity } from "dxf-parser";
+import { LoadOptions } from "./pipeline/types";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
@@ -62,6 +63,13 @@ export interface DxfViewerProps {
   showGrid?: boolean;
   /** Show axes helper (default: true) */
   showAxes?: boolean;
+  /**
+   * Replace the parse-and-analyse step, e.g. with a worker-backed one.
+   *
+   * The value it resolves to is plain, structured-cloneable data, so it can
+   * be produced on another thread and posted back unchanged.
+   */
+  prepare?: LoadOptions["prepare"];
   /** Show a live frame-rate and renderer-counter overlay (default: false) */
   showStats?: boolean;
   /** Show debug information overlay (default: false) */

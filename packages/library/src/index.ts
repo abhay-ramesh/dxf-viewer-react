@@ -38,6 +38,18 @@ export type {
   StyleSubject,
 } from "./style/types";
 
+// Loading pipeline: async, cancellable, worker-ready.
+export { loadDocument, LoadAbortedError } from "./pipeline/loadDocument";
+export { prepareDrawing, rehydrateLoops } from "./pipeline/prepare";
+export type {
+  LoadOptions,
+  LoadPhase,
+  LoadProgress,
+  PreparedDrawing,
+  PreparedLoop,
+  PreparedLoops,
+} from "./pipeline/types";
+
 // Tools.
 export { MeasureTool, PanTool, SelectTool } from "./tools";
 export type { Tool, ToolContext, ToolType } from "./tools/types";

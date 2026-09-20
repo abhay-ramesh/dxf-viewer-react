@@ -25,6 +25,8 @@ import {
 import { DxfAnalyzer } from "./utils/DxfAnalyzer";
 import { DxfDocument } from "./document/DxfDocument";
 import { deriveGeometry, deriveMeshGeometry } from "./document/derive";
+import { rehydrateLoops } from "./pipeline/prepare";
+import { PreparedDrawing } from "./pipeline/types";
 import { StyleResolver } from "./style/StyleResolver";
 
 // Type guards to safely check entity types and properties
@@ -411,7 +413,7 @@ function createClosedShapeFromEntities(loop: {
 }
 
 // Separate outer loops from holes using improved containment analysis
-function separateOuterLoopsFromHoles(
+export function separateOuterLoopsFromHoles(
   loops: Array<{
     entities: IEntity[];
     vertices: Array<{ x: number; y: number }>;
@@ -672,7 +674,7 @@ function isPointOnLineSegment(
 // Removed convertToTracedLoops function - using DxfAnalyzer results directly
 
 // Find closed loops using enhanced approach: DxfAnalyzer connectivity + proper ordering
-function createOrderedLoopsFromConnectivity({
+export function createOrderedLoopsFromConnectivity({
   entities,
 }: {
   entities: IEntity[];
@@ -1495,13 +1497,20 @@ export interface ProcessOptions {
   style: StyleResolver;
   /** Build filled meshes for detected closed loops. */
   showShapeColors?: boolean;
+  /**
+   * Parse and analysis output from {@link prepareDrawing}.
+   *
+   * Supplying it skips both phases here, which is what lets them run
+   * elsewhere — on a worker, or simply earlier.
+   */
+  prepared?: PreparedDrawing;
 }
 
 export function processDxf(
   dxfContent: string,
   options: ProcessOptions
 ): ProcessDxfResult {
-  const { style, showShapeColors = true } = options;
+  const { style, showShapeColors = true, prepared } = options;
   const totalStartTime = performance.now();
 
   // Parse DXF
@@ -1515,7 +1524,12 @@ export function processDxf(
   } | null = null;
   let parseError: Error | null = null;
   try {
-    dxfData = new DxfParser().parseSync(dxfContent) as any;
+    if (prepared) {
+      if (prepared.parseError) throw new Error(prepared.parseError);
+      dxfData = prepared.data as any;
+    } else {
+      dxfData = new DxfParser().parseSync(dxfContent) as any;
+    }
     entities = dxfData?.entities || [];
   } catch (error) {
     parseError =
@@ -1548,17 +1562,17 @@ export function processDxf(
   }> = [];
 
   if (showShapeColors) {
-    const analysisStartTime = performance.now();
-
-    // Find closed loops using enhanced approach
-    const closedLoops = createOrderedLoopsFromConnectivity({ entities });
-
-    // Separate outer loops from holes
-    const result = separateOuterLoopsFromHoles(closedLoops);
-    outerLoops = result.outerLoops;
-    holes = result.holes;
-
-    const analysisEndTime = performance.now();
+    if (prepared?.loops) {
+      // Already analysed, possibly on another thread. Loops arrive as entity
+      // indices, so they are resolved against this thread's entity array.
+      outerLoops = rehydrateLoops(prepared.loops.outer, entities);
+      holes = rehydrateLoops(prepared.loops.holes, entities);
+    } else {
+      const closedLoops = createOrderedLoopsFromConnectivity({ entities });
+      const result = separateOuterLoopsFromHoles(closedLoops);
+      outerLoops = result.outerLoops;
+      holes = result.holes;
+    }
   } else {
     // Skip shape analysis when colors are disabled for better performance
   }
