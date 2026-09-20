@@ -1,0 +1,37 @@
+"$schema" = "https://conductor.build/schemas/settings.repo.schema.json"
+
+# Bun workspace monorepo: packages/library (tsdown) + packages/demo (vite).
+# The demo imports the library through its `exports` (dist/*), so the library
+# must be built once before the demo dev server can resolve it.
+
+[scripts]
+# Plain `bun install` (not --frozen-lockfile) so a workspace still sets itself
+# up when a branch adds a dependency without committing bun.lock.
+setup = "bun install && bun run --filter dxf-viewer-react build"
+archive = "rm -rf node_modules packages/*/node_modules packages/*/dist"
+
+# Every workspace gets its own CONDUCTOR_PORT, and nothing here shares a
+# database, Docker stack or fixed port, so workspaces can run side by side.
+run_mode = "concurrent"
+
+# Demo app on this workspace's allocated port. CONDUCTOR_PORT is local-only.
+[scripts.run.demo]
+command = "bun run --filter dxf-viewer-react-demo dev --port $CONDUCTOR_PORT --strictPort"
+available_in = [ "local" ]
+default = true
+icon = "play"
+
+# Rebuild the library on change; pair with the demo run script when editing
+# packages/library so the demo picks up fresh dist output.
+[scripts.run.library-watch]
+command = "bun run --filter dxf-viewer-react dev"
+icon = "refresh-cw"
+
+# Typecheck + production build of both packages.
+[scripts.run.build]
+command = "bun run build"
+icon = "hammer"
+
+[scripts.run.lint]
+command = "bun run lint"
+icon = "check-check"

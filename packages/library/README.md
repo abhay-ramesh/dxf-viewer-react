@@ -21,7 +21,7 @@ A React component library and hook for viewing DXF (Drawing Exchange Format) fil
 ```bash
 npm install dxf-viewer-react three
 # or
-pnpm add dxf-viewer-react three
+bun add dxf-viewer-react three
 # or
 yarn add dxf-viewer-react three
 ```
@@ -181,9 +181,9 @@ function AdvancedViewer({ dxfString }) {
 ## Development
 
 1. Clone the repository
-2. Install dependencies: `pnpm install`
-3. Run dev server: `pnpm dev`
-4. Build library: `pnpm build:lib`
+2. Install dependencies: `bun install`
+3. Run dev server: `bun run dev`
+4. Build library: `bun run --filter dxf-viewer-react build`
 
 ## License
 
