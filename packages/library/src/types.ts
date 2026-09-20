@@ -95,6 +95,16 @@ export interface DxfViewerProps {
    * be produced on another thread and posted back unchanged.
    */
   prepare?: LoadOptions["prepare"];
+  /**
+   * How wheel events are read (default: "auto").
+   *
+   * "auto" pans for a trackpad and zooms for a mouse wheel; ctrl or cmd held
+   * always zooms, which is also what a trackpad pinch reports. Force one
+   * behaviour with "zoom" or "pan".
+   */
+  wheelBehavior?: "auto" | "zoom" | "pan";
+  /** Multiplier on zoom travel (default: 1). */
+  zoomSpeed?: number;
   /** Show a live frame-rate and renderer-counter overlay (default: false) */
   showStats?: boolean;
   /** Show debug information overlay (default: false) */

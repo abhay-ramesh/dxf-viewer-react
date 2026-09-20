@@ -1,15 +1,16 @@
 import * as THREE from "three";
-import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
 import { DxfDocument } from "../document/DxfDocument";
 import { EntityId } from "../document/types";
 import { ProcessDxfResult } from "../processDxf";
-import { setupControls } from "../setupControls";
+import { CameraController } from "./CameraController";
 import { StyleResolver } from "../style/StyleResolver";
 import { MeasurementModel } from "./MeasurementModel";
 import { MeasurementRenderer } from "./MeasurementRenderer";
 import { SelectionModel } from "./SelectionModel";
 import { SnapService } from "./SnapService";
 import { Tool, ToolContext, ToolType } from "../tools/types";
+import { WheelBehavior } from "./gestures";
 import { Emitter, ViewerEventName, ViewerEvents } from "./events";
 import { FrameStats, PerformanceMonitor } from "./PerformanceMonitor";
 import { RenderScheduler } from "./RenderScheduler";
@@ -17,6 +18,13 @@ import { RenderScheduler } from "./RenderScheduler";
 export interface CoreOptions {
   /** Decides colours. Supply the same resolver used to build the document. */
   style?: StyleResolver;
+  /**
+   * How wheel events are read. "auto" pans for a trackpad and zooms for a
+   * mouse; ctrl/cmd always zooms.
+   */
+  wheelBehavior?: WheelBehavior;
+  /** Multiplier on zoom travel. */
+  zoomSpeed?: number;
   backgroundColor?: string | number | THREE.Color;
   showGrid?: boolean;
   showAxes?: boolean;
@@ -31,6 +39,8 @@ interface LayerState {
 
 const DEFAULTS = {
   backgroundColor: 0xf0f0f0 as string | number | THREE.Color,
+  wheelBehavior: "auto" as WheelBehavior,
+  zoomSpeed: 1,
   showGrid: true,
   showAxes: true,
   gridSize: 100,
@@ -54,7 +64,7 @@ export class DxfViewerCore {
   readonly scene = new THREE.Scene();
   readonly camera: THREE.OrthographicCamera;
   readonly renderer: THREE.WebGLRenderer;
-  readonly controls: OrbitControls;
+  readonly controls: CameraController;
 
   private readonly emitter = new Emitter();
   private readonly scheduler: RenderScheduler;
@@ -146,23 +156,16 @@ export class DxfViewerCore {
     this.camera.up.set(0, 1, 0);
     this.camera.lookAt(0, 0, 0);
 
-    this.controls = setupControls(
-      this.camera,
-      this.renderer,
-      new THREE.Vector3()
-    );
+    this.controls = new CameraController(this.camera, this.renderer.domElement, {
+      wheelBehavior: this.options.wheelBehavior,
+      zoomSpeed: this.options.zoomSpeed,
+    });
     this.controls.enabled = this.options.interactive;
 
-    // Render only. Calling controls.update() here would fire the controls'
-    // "change" event, which invalidates, which schedules another frame — a
-    // self-sustaining loop that defeats the whole point of on-demand
-    // rendering. OrbitControls already calls update() itself in response to
-    // input; the only case needing a per-frame update is damping, handled by
-    // the continuous hold below.
+    // Render, and nothing else. The controller mutates the camera directly
+    // in response to input and emits "change", so there is no per-frame
+    // update step to run here — and running one would re-enter this loop.
     this.scheduler = new RenderScheduler(() => {
-      if (this.controls.enableDamping && this.scheduler.isHeld) {
-        this.controls.update();
-      }
       this.monitor.beginFrame();
       this.renderer.render(this.scene, this.camera);
       if (this.statsTimer !== null) {
@@ -175,16 +178,16 @@ export class DxfViewerCore {
 
     // A control interaction needs frames while it runs, and exactly one more
     // when it ends.
-    this.controls.addEventListener("start", () => {
+    this.controls.on("start", () => {
       this.releaseContinuous?.();
       this.releaseContinuous = this.scheduler.holdContinuous();
     });
-    this.controls.addEventListener("end", () => {
+    this.controls.on("end", () => {
       this.releaseContinuous?.();
       this.releaseContinuous = null;
       this.invalidate();
     });
-    this.controls.addEventListener("change", () => {
+    this.controls.on("change", () => {
       this.emitter.emit("camera:change", {});
       this.invalidate();
     });
@@ -284,6 +287,10 @@ export class DxfViewerCore {
       );
     }
     if (helpersChanged) this.applyHelperOptions();
+    this.controls.setOptions({
+      wheelBehavior: this.options.wheelBehavior,
+      zoomSpeed: this.options.zoomSpeed,
+    });
     if (interactiveChanged) {
       this.controls.enabled = this.options.interactive;
       if (!this.options.interactive) this.setTool(null);
@@ -433,8 +440,7 @@ export class DxfViewerCore {
     this.camera.zoom = 1;
     this.camera.position.set(center.x, center.y, 100);
     this.camera.updateProjectionMatrix();
-    this.controls.target.set(center.x, center.y, 0);
-    this.controls.update();
+    this.camera.updateMatrixWorld();
     this.invalidate();
   }
 

@@ -1,19 +1,20 @@
 import { Tool, ToolContext } from "./types";
 
+/**
+ * Drag to pan.
+ *
+ * The tool used to reach into OrbitControls and rewrite its mouse-button and
+ * touch tables by numeric constant. The camera controller has one question to
+ * answer — may a drag pan the view — so that is all this sets.
+ */
 export class PanTool implements Tool {
   type = "pan" as const;
 
   activate({ controls }: ToolContext) {
-    controls.enablePan = true;
-    controls.enableRotate = false;
-    controls.mouseButtons.LEFT = 2; // THREE.MOUSE.PAN
-    controls.mouseButtons.MIDDLE = 2; // THREE.MOUSE.PAN - middle mouse for panning
-    controls.touches.ONE = 2; // THREE.TOUCH.PAN
+    controls.dragPanEnabled = true;
   }
 
   deactivate({ controls }: ToolContext) {
-    controls.enablePan = false;
-    controls.mouseButtons.LEFT = null; // No action
-    controls.touches.ONE = 0; // No action
+    controls.dragPanEnabled = false;
   }
 }

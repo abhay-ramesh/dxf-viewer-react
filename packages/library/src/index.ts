@@ -25,6 +25,10 @@ export { RenderScheduler } from "./core/RenderScheduler";
 export { PerformanceMonitor } from "./core/PerformanceMonitor";
 export type { FrameStats } from "./core/PerformanceMonitor";
 export { SelectionModel } from "./core/SelectionModel";
+export { CameraController } from "./core/CameraController";
+export type { CameraControllerOptions } from "./core/CameraController";
+export { classifyWheel, DeviceHeuristic, pixelDelta } from "./core/gestures";
+export type { WheelBehavior, WheelIntent, WheelLike } from "./core/gestures";
 export { SnapService } from "./core/SnapService";
 export type { SnapOptions } from "./core/SnapService";
 export {

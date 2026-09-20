@@ -54,16 +54,15 @@ export class MeasureTool implements Tool {
   }
 
   activate({ controls, scene }: ToolContext) {
-    controls.enablePan = false;
-    controls.enableRotate = false;
-    controls.mouseButtons.LEFT = null;
+    // A drag belongs to this tool, not to the camera; wheel zoom and
+    // space-drag still work.
+    controls.dragPanEnabled = false;
     scene.add(this.indicator);
     this.reset();
   }
 
   deactivate({ controls, scene, measurements }: ToolContext) {
-    controls.enablePan = false;
-    controls.mouseButtons.LEFT = null;
+    controls.dragPanEnabled = true;
     scene.remove(this.indicator);
     this.reset();
     this.onMeasureDisplay?.(

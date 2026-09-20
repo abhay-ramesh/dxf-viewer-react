@@ -46,14 +46,13 @@ export class SelectTool implements Tool {
   ) {}
 
   activate({ controls }: ToolContext) {
-    controls.enablePan = false;
-    controls.enableRotate = false;
-    controls.mouseButtons.LEFT = null;
+    // A drag belongs to this tool, not to the camera; wheel zoom and
+    // space-drag still work.
+    controls.dragPanEnabled = false;
   }
 
   deactivate({ controls, selection }: ToolContext) {
-    controls.enablePan = false;
-    controls.mouseButtons.LEFT = null;
+    controls.dragPanEnabled = true;
     selection.setHovered(null);
     selection.clear();
     this.onInfoUpdate?.(null);

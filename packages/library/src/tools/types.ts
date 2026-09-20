@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { CameraController } from "../core/CameraController";
 import { MeasurementModel } from "../core/MeasurementModel";
 import { SelectionModel } from "../core/SelectionModel";
 import { MeasurementRenderer } from "../core/MeasurementRenderer";
@@ -12,7 +12,7 @@ export interface ToolContext {
   scene: THREE.Scene;
   camera: THREE.OrthographicCamera;
   renderer: THREE.WebGLRenderer;
-  controls: OrbitControls;
+  controls: CameraController;
   group: THREE.Group;
   /**
    * The loaded drawing. Tools resolve hits and read geometry facts from here

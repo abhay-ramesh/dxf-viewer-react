@@ -32,6 +32,8 @@ export const useDxfViewer = ({
   showShapeColors = true,
   shapeColors,
   interactive = true,
+  wheelBehavior,
+  zoomSpeed,
   showStats = false,
   prepare: prepareOverride,
   defaultTool = "pan",
@@ -108,6 +110,8 @@ export const useDxfViewer = ({
         showGrid,
         showAxes,
         interactive,
+        wheelBehavior,
+        zoomSpeed,
       });
     } catch (err) {
       const failure =
@@ -151,8 +155,19 @@ export const useDxfViewer = ({
       showGrid,
       showAxes,
       interactive,
+      wheelBehavior,
+      zoomSpeed,
     });
-  }, [core, style, backgroundColor, showGrid, showAxes, interactive]);
+  }, [
+    core,
+    style,
+    backgroundColor,
+    showGrid,
+    showAxes,
+    interactive,
+    wheelBehavior,
+    zoomSpeed,
+  ]);
 
   // Loading happens off the render path, one load at a time. Switching files
   // mid-load cancels the previous one rather than letting two races decide
