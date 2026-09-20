@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { DxfViewerCore } from "./core/DxfViewerCore";
+import { buildPartsReport, PartsReport } from "./analysis/PartsReport";
 import { DrawingReport } from "./document/DrawingReport";
 import { Measurement } from "./core/MeasurementModel";
 import { FrameStats } from "./core/PerformanceMonitor";
@@ -302,6 +303,16 @@ export const useDxfViewer = ({
     });
   }, [processed]);
 
+  // A takeoff is derived from the loaded document, so it is computed on
+  // demand rather than kept in state: it costs a pass over the entities and
+  // most consumers never ask for it.
+  const partsReport = useMemo<PartsReport | null>(() => {
+    if (!processed?.document.size) return null;
+    return buildPartsReport(processed.document, {
+      units: String(processed.stats.DXF_UNITS ?? ""),
+    });
+  }, [processed]);
+
   // --- imperative API ------------------------------------------------------
 
   const toggleLayer = useCallback(
@@ -337,6 +348,8 @@ export const useDxfViewer = ({
     stats,
     /** What could not be drawn, and why. Null until a drawing is loaded. */
     report,
+    /** Areas, cut lengths, hole counts and notes — a fabrication takeoff. */
+    partsReport,
     /** Live frame timing and renderer counters, when showStats is on. */
     frameStats,
     analyzedData,

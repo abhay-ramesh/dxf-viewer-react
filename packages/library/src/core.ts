@@ -23,6 +23,10 @@ export type { ViewerEventName, ViewerEvents } from "./core/events";
 export { classifyWheel, DeviceHeuristic, pixelDelta } from "./core/gestures";
 export type { WheelBehavior, WheelIntent, WheelLike } from "./core/gestures";
 
+// Analysis: the drawing as numbers, for takeoff and fabrication.
+export { buildPartsReport, partsReportToCsv } from "./analysis/PartsReport";
+export type { Part, PartsReport, BlockCount } from "./analysis/PartsReport";
+
 // Document model.
 export { DxfDocument } from "./document/DxfDocument";
 export { DrawingReport } from "./document/DrawingReport";

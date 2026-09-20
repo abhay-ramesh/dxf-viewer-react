@@ -1998,6 +1998,11 @@ export function processDxf(
               (sum, hole) => sum + hole.area,
               0
             ),
+            // The cutter travels the outline and every hole.
+            holePerimeter: shapeGroup.containedHoles.reduce(
+              (sum, hole) => sum + hole.perimeter,
+              0
+            ),
             layer: shapeGroup.outerLoop.entities[0]?.layer || "0",
           };
 

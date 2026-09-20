@@ -10,6 +10,8 @@ export { MeasureReadout } from "./MeasureReadout";
 export type { MeasureReadoutProps } from "./MeasureReadout";
 export { OmissionNotice } from "./OmissionNotice";
 export type { OmissionNoticeProps } from "./OmissionNotice";
+export { PartsPanel } from "./PartsPanel";
+export type { PartsPanelProps } from "./PartsPanel";
 export { StatsOverlay } from "./StatsOverlay";
 export type { StatsOverlayProps } from "./StatsOverlay";
 export { Toolbar } from "./Toolbar";

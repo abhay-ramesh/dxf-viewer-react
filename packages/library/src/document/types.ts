@@ -45,6 +45,12 @@ export interface DerivedGeometry {
    * rather than near.
    */
   triangles?: Float32Array;
+  /** How many closed loops this outline encloses, for filled areas. */
+  holes?: number;
+  /** Combined area of those holes. */
+  holeArea?: number;
+  /** Combined perimeter of those holes — cut length the tool must travel. */
+  holePerimeter?: number;
 }
 
 export interface IndexedEntity {

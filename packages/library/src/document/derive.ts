@@ -199,6 +199,12 @@ export function deriveMeshGeometry(mesh: THREE.Mesh): DerivedGeometry {
     area: (mesh.userData.outerArea as number) ?? undefined,
     length: (mesh.userData.perimeter as number) ?? undefined,
     closed: true,
+    // The shape builder already worked out which loops are holes in this
+    // outline; re-deriving that from bounding boxes would be both slower and
+    // less accurate.
+    holes: (mesh.userData.holeCount as number) ?? undefined,
+    holeArea: (mesh.userData.totalHoleArea as number) ?? undefined,
+    holePerimeter: (mesh.userData.holePerimeter as number) ?? undefined,
     // A filled area has no outline to be near: you are either inside it or
     // you are not, so it carries triangles rather than segments.
     segments: new Float32Array(0),
