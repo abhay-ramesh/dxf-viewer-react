@@ -40,8 +40,20 @@ export interface DxfViewerProps {
   dxfContent: string | null;
   /** Background color of the viewer (default: #f0f0f0) */
   backgroundColor?: string | number | THREE.Color;
-  /** Color of the DXF entities (default: #0000ff) */
+  /**
+   * Force every stroke to one colour.
+   *
+   * Leave unset to honour the drawing's own ByLayer colours, the way a CAD
+   * application does. (Before 0.3 this defaulted to #0000ff, which painted
+   * over whatever the file said.)
+   */
   entityColor?: string | number | THREE.Color;
+  /** Colour for the entity under the cursor (default: #00ff00) */
+  hoverColor?: string | number | THREE.Color;
+  /** Colour for selected entities (default: #ff0000) */
+  selectionColor?: string | number | THREE.Color;
+  /** Override specific layers by name; outranks entityColor. */
+  layerColors?: Record<string, string | number | THREE.Color>;
   /** Width of the viewer (default: 100%) */
   width?: string | number;
   /** Height of the viewer (default: 100%) */

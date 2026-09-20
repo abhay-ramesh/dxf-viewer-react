@@ -1,5 +1,7 @@
 import * as THREE from "three";
 import { processDxf } from "../src/processDxf";
+import { StyleResolver } from "../src/style/StyleResolver";
+import { StyleOptions } from "../src/style/types";
 
 export async function loadFixture(name: string): Promise<string> {
   return Bun.file(new URL(`./fixtures/${name}`, import.meta.url)).text();
@@ -11,9 +13,15 @@ export async function loadDemoFixture(): Promise<string> {
   ).text();
 }
 
-export function run(content: string, showShapeColors = true) {
-  const material = new THREE.LineBasicMaterial({ color: 0x0000ff });
-  return processDxf(content, material, showShapeColors, undefined);
+export function run(
+  content: string,
+  showShapeColors = true,
+  style: StyleOptions = {}
+) {
+  return processDxf(content, {
+    style: new StyleResolver(style),
+    showShapeColors,
+  });
 }
 
 /** Every object in the scene graph that would issue a draw call. */

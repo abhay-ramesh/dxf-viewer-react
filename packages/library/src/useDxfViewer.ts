@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { DxfViewerCore } from "./core/DxfViewerCore";
+import { StyleResolver } from "./style/StyleResolver";
 import { DxfDocument } from "./document/DxfDocument";
 import { processDxf } from "./processDxf";
 import { MeasureTool, PanTool, SelectTool } from "./tools";
@@ -18,7 +19,10 @@ import { DxfAnalyzer } from "./utils/DxfAnalyzer";
 export const useDxfViewer = ({
   dxfContent,
   backgroundColor = 0xf0f0f0,
-  entityColor = 0x0000ff,
+  entityColor,
+  hoverColor,
+  selectionColor,
+  layerColors,
   showGrid = true,
   showAxes = true,
   showShapeColors = true,
@@ -53,17 +57,37 @@ export const useDxfViewer = ({
   const callbacks = useRef({ onLoad, onError, onMeasureComplete });
   callbacks.current = { onLoad, onError, onMeasureComplete };
 
-  const material = useMemo(
-    () => new THREE.LineBasicMaterial({ color: entityColor }),
-    [entityColor]
+  // One resolver decides every colour: strokes, fills, hover, selection.
+  // With no entityColor supplied it honours the drawing's own ByLayer
+  // colours, the way a CAD application does.
+  const style = useMemo(
+    () =>
+      new StyleResolver({
+        backgroundColor,
+        entityColor,
+        shapeColors,
+        hoverColor,
+        selectionColor,
+        layerColors,
+      }),
+    [
+      backgroundColor,
+      entityColor,
+      shapeColors,
+      hoverColor,
+      selectionColor,
+      layerColors,
+    ]
   );
 
   // Still synchronous, still on the main thread — moving this to a worker is
   // the next step. Nothing downstream assumes it is synchronous.
   const processed = useMemo(
-    () => processDxf(dxfContent || "", material, showShapeColors, shapeColors),
-    [dxfContent, material, showShapeColors, shapeColors]
+    () => processDxf(dxfContent || "", { style, showShapeColors }),
+    [dxfContent, style, showShapeColors]
   );
+
+  useEffect(() => () => style.dispose(), [style]);
 
   // --- core lifecycle: one per container, not one per prop change ----------
 

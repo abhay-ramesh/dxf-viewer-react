@@ -1,9 +1,9 @@
 import * as THREE from "three";
 import { processDxf } from "../src/processDxf";
+import { StyleResolver } from "../src/style/StyleResolver";
 const content = await Bun.file(new URL("../../demo/public/test.dxf", import.meta.url)).text();
-const mat = new THREE.LineBasicMaterial({ color: 0x0000ff });
 const t0 = performance.now();
-const r = processDxf(content, mat, true, undefined);
+const r = processDxf(content, { style: new StyleResolver() });
 const t1 = performance.now();
 let objects = 0, verts = 0;
 r.group.traverse((o: any) => { if (o.geometry) { objects++; const p = o.geometry.getAttribute?.("position"); if (p) verts += p.count; } });
