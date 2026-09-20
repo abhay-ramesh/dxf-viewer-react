@@ -66,9 +66,12 @@ export function setupControls(
   controls.minPolarAngle = Math.PI / 2;
   controls.maxPolarAngle = Math.PI / 2;
   
-  // Allow rotation around Z axis (azimuthal) but keep it flat
-  controls.minAzimuthalAngle = -Infinity;
-  controls.maxAzimuthalAngle = Infinity;
+  // Allow rotation around Z axis (azimuthal) but keep it flat.
+  // (Moot while enableRotate is false, but the names were wrong: OrbitControls
+  // spells these minAzimuthAngle/maxAzimuthAngle, so both assignments were
+  // silently creating unused properties.)
+  controls.minAzimuthAngle = -Infinity;
+  controls.maxAzimuthAngle = Infinity;
   
   // Ensure we're always looking straight down
   controls.target.set(center.x, center.y, 0);

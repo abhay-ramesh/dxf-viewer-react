@@ -1,0 +1,538 @@
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { DxfDocument } from "../document/DxfDocument";
+import { EntityId } from "../document/types";
+import { ProcessDxfResult } from "../processDxf";
+import { setupControls } from "../setupControls";
+import { Tool, ToolContext, ToolType } from "../tools/types";
+import { Emitter, ViewerEventName, ViewerEvents } from "./events";
+import { RenderScheduler } from "./RenderScheduler";
+
+export interface CoreOptions {
+  backgroundColor?: string | number | THREE.Color;
+  showGrid?: boolean;
+  showAxes?: boolean;
+  gridSize?: number;
+  axesSize?: number;
+  interactive?: boolean;
+}
+
+interface LayerState {
+  visible: boolean;
+}
+
+const DEFAULTS = {
+  backgroundColor: 0xf0f0f0 as string | number | THREE.Color,
+  showGrid: true,
+  showAxes: true,
+  gridSize: 100,
+  axesSize: 50,
+  interactive: true,
+};
+
+/**
+ * The viewer, as an object that owns its WebGL context.
+ *
+ * The renderer, scene, camera and controls are created once, when the core is
+ * constructed, and live until `dispose()`. Changing what is displayed —
+ * document, background, grid, layer visibility, tool — mutates them in place.
+ *
+ * That is the whole point. Previously each of these was a `useMemo` over
+ * props, so toggling the grid rebuilt the scene and resizing the window
+ * rebuilt the camera, throwing away the user's pan and zoom. Nothing here
+ * imports React; the hook is a binding over this.
+ */
+export class DxfViewerCore {
+  readonly scene = new THREE.Scene();
+  readonly camera: THREE.OrthographicCamera;
+  readonly renderer: THREE.WebGLRenderer;
+  readonly controls: OrbitControls;
+
+  private readonly emitter = new Emitter();
+  private readonly scheduler: RenderScheduler;
+  private readonly resizeObserver: ResizeObserver | null = null;
+
+  /** Everything that is not drawing content: grid, axes. */
+  private readonly helpers = new THREE.Group();
+  private gridHelper: THREE.Group | null = null;
+  private axesHelper: THREE.AxesHelper | null = null;
+
+  /** The current drawing's renderables. Swapped wholesale by setDocument. */
+  private contentGroup = new THREE.Group();
+  private document = new DxfDocument();
+  private layerGroups: Record<string, THREE.Group> = {};
+  private layerState = new Map<string, LayerState>();
+
+  private readonly tools = new Map<string, Tool>();
+  private activeTool: Tool | null = null;
+  private releaseContinuous: (() => void) | null = null;
+
+  private options: Required<CoreOptions>;
+  private disposed = false;
+
+  constructor(
+    private readonly container: HTMLElement,
+    options: CoreOptions = {}
+  ) {
+    this.options = { ...DEFAULTS, ...stripUndefined(options) };
+
+    const { clientWidth, clientHeight } = container;
+    const width = clientWidth || 800;
+    const height = clientHeight || 600;
+
+    this.renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      powerPreference: "high-performance",
+      precision: "mediump",
+      preserveDrawingBuffer: true,
+    });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setSize(width, height);
+    container.appendChild(this.renderer.domElement);
+
+    this.scene.background = new THREE.Color(this.options.backgroundColor);
+    this.helpers.name = "dxf-helpers";
+    this.scene.add(this.helpers);
+    this.contentGroup.name = "dxf-content-group";
+    this.scene.add(this.contentGroup);
+    this.applyHelperOptions();
+
+    const viewSize = 40;
+    const aspect = width / height;
+    this.camera = new THREE.OrthographicCamera(
+      (-viewSize * aspect) / 2,
+      (viewSize * aspect) / 2,
+      viewSize / 2,
+      -viewSize / 2,
+      0.1,
+      10000
+    );
+    this.camera.position.set(0, 0, 100);
+    this.camera.up.set(0, 1, 0);
+    this.camera.lookAt(0, 0, 0);
+
+    this.controls = setupControls(
+      this.camera,
+      this.renderer,
+      new THREE.Vector3()
+    );
+    this.controls.enabled = this.options.interactive;
+
+    // Render only. Calling controls.update() here would fire the controls'
+    // "change" event, which invalidates, which schedules another frame — a
+    // self-sustaining loop that defeats the whole point of on-demand
+    // rendering. OrbitControls already calls update() itself in response to
+    // input; the only case needing a per-frame update is damping, handled by
+    // the continuous hold below.
+    this.scheduler = new RenderScheduler(() => {
+      if (this.controls.enableDamping && this.scheduler.isHeld) {
+        this.controls.update();
+      }
+      this.renderer.render(this.scene, this.camera);
+    });
+
+    // A control interaction needs frames while it runs, and exactly one more
+    // when it ends.
+    this.controls.addEventListener("start", () => {
+      this.releaseContinuous?.();
+      this.releaseContinuous = this.scheduler.holdContinuous();
+    });
+    this.controls.addEventListener("end", () => {
+      this.releaseContinuous?.();
+      this.releaseContinuous = null;
+      this.invalidate();
+    });
+    this.controls.addEventListener("change", () => {
+      this.emitter.emit("camera:change", {});
+      this.invalidate();
+    });
+
+    if (typeof ResizeObserver !== "undefined") {
+      this.resizeObserver = new ResizeObserver(() => this.resize());
+      this.resizeObserver.observe(container);
+    }
+
+    this.attachPointerListeners();
+    this.invalidate();
+  }
+
+  // ---------------------------------------------------------------- content
+
+  /**
+   * Show a parsed drawing.
+   *
+   * @param preserveView keep the current pan and zoom instead of framing the
+   * new content. Callers re-processing the same file after a styling change
+   * want this; callers loading a different file do not.
+   */
+  setDocument(result: ProcessDxfResult, preserveView = false): void {
+    if (this.disposed) return;
+
+    this.scene.remove(this.contentGroup);
+    disposeSubtree(this.contentGroup);
+
+    this.contentGroup = result.group;
+    this.contentGroup.name = "dxf-content-group";
+    this.document = result.document;
+    this.layerGroups = result.layers;
+    this.scene.add(this.contentGroup);
+
+    // Re-apply layer visibility the user had already chosen, and register any
+    // layer we have not seen before as visible.
+    for (const name of Object.keys(this.layerGroups)) {
+      const existing = this.layerState.get(name);
+      if (existing) this.layerGroups[name].visible = existing.visible;
+      else this.layerState.set(name, { visible: true });
+    }
+
+    if (!preserveView) this.fitToContent();
+
+    if (result.parseError) {
+      this.emitter.emit("document:error", { error: result.parseError });
+    } else {
+      this.emitter.emit("document:loaded", {
+        entityCount: this.document.size,
+        stats: numericOnly(result.stats),
+      });
+    }
+    this.invalidate();
+  }
+
+  getDocument(): DxfDocument {
+    return this.document;
+  }
+
+  // ------------------------------------------------------------ appearance
+
+  setOptions(options: CoreOptions): void {
+    if (this.disposed) return;
+    const next = { ...this.options, ...stripUndefined(options) };
+    const changed = (key: keyof CoreOptions) => next[key] !== this.options[key];
+
+    const helpersChanged =
+      changed("showGrid") ||
+      changed("showAxes") ||
+      changed("gridSize") ||
+      changed("axesSize");
+    const backgroundChanged = changed("backgroundColor");
+    const interactiveChanged = changed("interactive");
+
+    this.options = next;
+
+    if (backgroundChanged) {
+      (this.scene.background as THREE.Color).set(
+        new THREE.Color(this.options.backgroundColor)
+      );
+    }
+    if (helpersChanged) this.applyHelperOptions();
+    if (interactiveChanged) {
+      this.controls.enabled = this.options.interactive;
+      if (!this.options.interactive) this.setTool(null);
+    }
+    if (backgroundChanged || helpersChanged) this.invalidate();
+  }
+
+  private applyHelperOptions(): void {
+    if (this.gridHelper) {
+      this.helpers.remove(this.gridHelper);
+      disposeSubtree(this.gridHelper);
+      this.gridHelper = null;
+    }
+    if (this.axesHelper) {
+      this.helpers.remove(this.axesHelper);
+      this.axesHelper.geometry.dispose();
+      this.axesHelper = null;
+    }
+
+    if (this.options.showGrid) {
+      this.gridHelper = createCADGrid(this.options.gridSize);
+      this.gridHelper.position.z = -0.01;
+      this.helpers.add(this.gridHelper);
+    }
+    if (this.options.showAxes) {
+      this.axesHelper = new THREE.AxesHelper(this.options.axesSize);
+      this.axesHelper.position.z = -0.005;
+      this.helpers.add(this.axesHelper);
+    }
+  }
+
+  // ---------------------------------------------------------------- layers
+
+  setLayerVisibility(layer: string, visible: boolean): void {
+    const group = this.layerGroups[layer];
+    if (!group) return;
+    this.layerState.set(layer, { visible });
+    group.visible = visible;
+    this.emitter.emit("layers:change", {});
+    this.invalidate();
+  }
+
+  toggleLayer(layer: string): void {
+    this.setLayerVisibility(layer, !this.isLayerVisible(layer));
+  }
+
+  isLayerVisible(layer: string): boolean {
+    return this.layerState.get(layer)?.visible ?? true;
+  }
+
+  // ----------------------------------------------------------------- tools
+
+  registerTool(tool: Tool): void {
+    this.tools.set(tool.type, tool);
+  }
+
+  getTool(type: string): Tool | undefined {
+    return this.tools.get(type);
+  }
+
+  get registeredTools(): string[] {
+    return [...this.tools.keys()];
+  }
+
+  setTool(type: ToolType | string | null): void {
+    if (this.disposed) return;
+    const next = type === null ? null : this.tools.get(type) ?? null;
+    if (next === this.activeTool) return;
+
+    const context = this.toolContext();
+    this.activeTool?.deactivate(context);
+    this.activeTool = next;
+    if (next && this.options.interactive) {
+      next.activate(context);
+      this.emitter.emit("tool:change", { tool: next.type });
+    }
+    this.invalidate();
+  }
+
+  get currentTool(): string | null {
+    return this.activeTool?.type ?? null;
+  }
+
+  private toolContext(): ToolContext {
+    return {
+      scene: this.scene,
+      camera: this.camera,
+      renderer: this.renderer,
+      controls: this.controls,
+      group: this.contentGroup,
+      document: this.document,
+    };
+  }
+
+  private attachPointerListeners(): void {
+    const canvas = this.renderer.domElement;
+    const forward =
+      (handler: "onMouseDown" | "onMouseMove" | "onMouseUp") =>
+      (event: MouseEvent) => {
+        if (!this.activeTool || !this.options.interactive) return;
+        this.activeTool[handler]?.(event, this.toolContext());
+        this.invalidate();
+      };
+    canvas.addEventListener("mousedown", forward("onMouseDown"));
+    canvas.addEventListener("mousemove", forward("onMouseMove"));
+    canvas.addEventListener("mouseup", forward("onMouseUp"));
+  }
+
+  // ---------------------------------------------------------------- camera
+
+  /** Frame the whole drawing. */
+  fitToContent(padding = 1.1): void {
+    const box = new THREE.Box3().setFromObject(this.contentGroup);
+    if (box.isEmpty()) return;
+
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const { width, height } = this.viewportSize();
+    const aspect = width / height;
+
+    const viewHeight = Math.max(size.y, size.x / aspect) * padding;
+    const viewWidth = viewHeight * aspect;
+
+    this.camera.left = -viewWidth / 2;
+    this.camera.right = viewWidth / 2;
+    this.camera.top = viewHeight / 2;
+    this.camera.bottom = -viewHeight / 2;
+    this.camera.zoom = 1;
+    this.camera.position.set(center.x, center.y, 100);
+    this.camera.updateProjectionMatrix();
+    this.controls.target.set(center.x, center.y, 0);
+    this.controls.update();
+    this.invalidate();
+  }
+
+  private viewportSize(): { width: number; height: number } {
+    return {
+      width: this.container.clientWidth || 800,
+      height: this.container.clientHeight || 600,
+    };
+  }
+
+  /**
+   * Re-fit the frustum to a new aspect ratio without rebuilding the camera,
+   * so pan and zoom survive a resize.
+   */
+  resize(): void {
+    if (this.disposed) return;
+    const { width, height } = this.viewportSize();
+    const aspect = width / height;
+
+    const currentHeight = this.camera.top - this.camera.bottom;
+    const centerX = (this.camera.left + this.camera.right) / 2;
+    const newWidth = currentHeight * aspect;
+
+    this.camera.left = centerX - newWidth / 2;
+    this.camera.right = centerX + newWidth / 2;
+    this.camera.updateProjectionMatrix();
+    this.renderer.setSize(width, height);
+    this.invalidate();
+  }
+
+  // ---------------------------------------------------------------- output
+
+  /**
+   * Render to a data URL.
+   *
+   * `scale` renders off-screen at a multiple of the display size, so export
+   * resolution is no longer tied to the size of the canvas on screen.
+   */
+  exportImage(format: "png" | "jpeg" = "png", scale = 1): string | null {
+    if (this.disposed) return null;
+    if (scale === 1) {
+      this.renderer.render(this.scene, this.camera);
+      return this.renderer.domElement.toDataURL(`image/${format}`);
+    }
+
+    const { width, height } = this.viewportSize();
+    const target = new THREE.WebGLRenderTarget(width * scale, height * scale);
+    const previous = this.renderer.getRenderTarget();
+    this.renderer.setRenderTarget(target);
+    this.renderer.render(this.scene, this.camera);
+
+    const buffer = new Uint8Array(width * scale * height * scale * 4);
+    this.renderer.readRenderTargetPixels(
+      target,
+      0,
+      0,
+      width * scale,
+      height * scale,
+      buffer
+    );
+    this.renderer.setRenderTarget(previous);
+
+    const canvas = window.document.createElement("canvas");
+    canvas.width = width * scale;
+    canvas.height = height * scale;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      target.dispose();
+      return null;
+    }
+    const image = ctx.createImageData(canvas.width, canvas.height);
+    // WebGL reads bottom-up; canvas ImageData is top-down.
+    const rowBytes = canvas.width * 4;
+    for (let y = 0; y < canvas.height; y++) {
+      const source = (canvas.height - y - 1) * rowBytes;
+      image.data.set(buffer.subarray(source, source + rowBytes), y * rowBytes);
+    }
+    ctx.putImageData(image, 0, 0);
+    target.dispose();
+    return canvas.toDataURL(`image/${format}`);
+  }
+
+  // ---------------------------------------------------------------- events
+
+  on<K extends ViewerEventName>(
+    event: K,
+    listener: (payload: ViewerEvents[K]) => void
+  ): () => void {
+    return this.emitter.on(event, listener);
+  }
+
+  emit<K extends ViewerEventName>(event: K, payload: ViewerEvents[K]): void {
+    this.emitter.emit(event, payload);
+  }
+
+  /** Ask for a frame. Safe to call from anywhere, including tools. */
+  invalidate(): void {
+    this.scheduler.invalidate();
+  }
+
+  // --------------------------------------------------------------- teardown
+
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+
+    this.releaseContinuous?.();
+    this.scheduler.dispose();
+    this.resizeObserver?.disconnect();
+    this.activeTool?.deactivate(this.toolContext());
+    this.activeTool = null;
+    this.controls.dispose();
+    this.emitter.clear();
+
+    disposeSubtree(this.scene);
+    this.renderer.dispose();
+    if (this.renderer.domElement.parentElement === this.container) {
+      this.container.removeChild(this.renderer.domElement);
+    }
+  }
+
+  get isDisposed(): boolean {
+    return this.disposed;
+  }
+}
+
+// --------------------------------------------------------------- utilities
+
+function stripUndefined<T extends object>(value: T): Partial<T> {
+  const out: Partial<T> = {};
+  for (const [key, v] of Object.entries(value)) {
+    if (v !== undefined) out[key as keyof T] = v as T[keyof T];
+  }
+  return out;
+}
+
+function numericOnly(
+  stats: Record<string, number | string>
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [key, value] of Object.entries(stats)) {
+    if (typeof value === "number") out[key] = value;
+  }
+  return out;
+}
+
+/** Release GPU memory for everything under an object, including the object. */
+export function disposeSubtree(root: THREE.Object3D): void {
+  root.traverse((object) => {
+    const mesh = object as Partial<THREE.Mesh>;
+    mesh.geometry?.dispose();
+    const material = mesh.material;
+    if (Array.isArray(material)) material.forEach((m) => m.dispose());
+    else material?.dispose();
+  });
+}
+
+/** CAD-style grid: a fine minor grid under a bolder major one. */
+export function createCADGrid(size: number): THREE.Group {
+  const group = new THREE.Group();
+  group.userData.isGrid = true;
+
+  const minor = new THREE.GridHelper(size, 200, 0x555555, 0x444444);
+  minor.rotation.x = Math.PI / 2;
+  minor.position.z = -0.002;
+  const minorMaterial = minor.material as THREE.LineBasicMaterial;
+  minorMaterial.transparent = true;
+  minorMaterial.opacity = 0.15;
+
+  const major = new THREE.GridHelper(size, 20, 0x999999, 0x777777);
+  major.rotation.x = Math.PI / 2;
+  major.position.z = -0.001;
+  const majorMaterial = major.material as THREE.LineBasicMaterial;
+  majorMaterial.transparent = true;
+  majorMaterial.opacity = 0.4;
+
+  group.add(minor, major);
+  return group;
+}

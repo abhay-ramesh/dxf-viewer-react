@@ -3,13 +3,6 @@ import { DxfViewerProps } from "./types";
 import { useDxfViewer } from "./useDxfViewer";
 
 export const DxfViewer: React.FC<DxfViewerProps> = (props) => {
-  // SSR guard - don't render on server
-  const [isMounted, setIsMounted] = React.useState(false);
-
-  React.useEffect(() => {
-    setIsMounted(true);
-  }, []);
-
   const {
     containerRef,
     currentTool,
@@ -20,21 +13,6 @@ export const DxfViewer: React.FC<DxfViewerProps> = (props) => {
     stats,
     error,
   } = useDxfViewer(props);
-
-  // Don't render anything on server
-  if (!isMounted) {
-    return (
-      <div
-        style={{
-          width: props.width || "100%",
-          height: props.height || "100%",
-          position: "relative",
-          overflow: "hidden",
-          backgroundColor: "#f0f0f0",
-        }}
-      />
-    );
-  }
 
   const {
     width = "100%",

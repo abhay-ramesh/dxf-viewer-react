@@ -1,22 +1,20 @@
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { DxfViewerCore } from "./core/DxfViewerCore";
+import { DxfDocument } from "./document/DxfDocument";
 import { processDxf } from "./processDxf";
-import { setupCamera } from "./setupCamera";
-import { setupControls } from "./setupControls";
-import { setupScene } from "./setupScene";
-import { MeasureTool, PanTool, SelectTool, Tool } from "./tools";
+import { MeasureTool, PanTool, SelectTool } from "./tools";
 import { DxfViewerProps, EntityInfo, LayerInfo } from "./types";
 import { DxfAnalyzer } from "./utils/DxfAnalyzer";
 
-// Hook to manage the viewer logic
+/**
+ * React binding over {@link DxfViewerCore}.
+ *
+ * The core owns the WebGL context, scene, camera and controls for the
+ * lifetime of the container element. This hook only feeds props into it and
+ * mirrors its events back out as React state — so changing a prop updates the
+ * viewer instead of rebuilding it, and pan/zoom survive every prop change.
+ */
 export const useDxfViewer = ({
   dxfContent,
   backgroundColor = 0xf0f0f0,
@@ -31,32 +29,13 @@ export const useDxfViewer = ({
   onError,
   onMeasureComplete,
 }: DxfViewerProps) => {
-  // SSR guard - don't initialize on server
-  const [isMounted, setIsMounted] = useState(false);
-  
-  useEffect(() => {
-    setIsMounted(true);
-  }, []);
-
   const containerRef = useRef<HTMLDivElement>(null);
-  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
-  const sceneRef = useRef<THREE.Scene | null>(null);
-  const cameraRef = useRef<THREE.OrthographicCamera | null>(null);
-  const controlsRef = useRef<OrbitControls | null>(null);
-  const animationFrameRef = useRef<number>();
-  const groupRef = useRef<THREE.Group | null>(null); // Track group reference
+  const [core, setCore] = useState<DxfViewerCore | null>(null);
 
   const [error, setError] = useState<string | null>(null);
-  const [isLoaded, setIsLoaded] = useState(false);
-  const [containerDimensions, setContainerDimensions] = useState<{
-    width: number;
-    height: number;
-  } | null>(null);
-
   const [currentTool, setCurrentTool] = useState<"pan" | "select" | "measure">(
     defaultTool
   );
-  const [activeTool, setActiveTool] = useState<Tool | null>(null);
   const [selectedEntityInfo, setSelectedEntityInfo] =
     useState<EntityInfo | null>(null);
   const [hoverInfo, setHoverInfo] = useState<{
@@ -66,494 +45,166 @@ export const useDxfViewer = ({
   } | null>(null);
   const [measureText, setMeasureText] = useState<string | null>(null);
   const [stats, setStats] = useState<Record<string, number | string>>({});
-  const [analyzedData, setAnalyzedData] = useState<any>(null);
+  const [analyzedData, setAnalyzedData] = useState<unknown>(null);
   const [layers, setLayers] = useState<LayerInfo[]>([]);
 
-  // Track container dimensions - initialize immediately with defaults
-  useLayoutEffect(() => {
-    if (containerRef.current) {
-      const width = containerRef.current.clientWidth || 800;
-      const height = containerRef.current.clientHeight || 600;
-      
-      // Always set dimensions if not set, or update if changed
-      if (!containerDimensions) {
-        setContainerDimensions({ width, height });
-      } else if (
-        containerDimensions.width !== width || 
-        containerDimensions.height !== height
-      ) {
-        setContainerDimensions({ width, height });
-      }
-    } else if (!containerDimensions) {
-      // Set default dimensions even if container isn't ready yet
-      setContainerDimensions({ width: 800, height: 600 });
-      console.log("[DXF Viewer] Container dimensions set to defaults (container not ready)");
-    }
-  }, [containerDimensions]);
-
-  // Resize observer
-  useLayoutEffect(() => {
-    if (!containerRef.current || !containerDimensions) return;
-
-    const handleContainerResize = () => {
-      if (containerRef.current) {
-        const newWidth = containerRef.current.clientWidth;
-        const newHeight = containerRef.current.clientHeight;
-
-        if (
-          newWidth !== containerDimensions.width ||
-          newHeight !== containerDimensions.height
-        ) {
-          setContainerDimensions({ width: newWidth, height: newHeight });
-        }
-      }
-    };
-
-    if (typeof ResizeObserver !== "undefined") {
-      const resizeObserver = new ResizeObserver(handleContainerResize);
-      resizeObserver.observe(containerRef.current);
-      return () => resizeObserver.disconnect();
-    }
-  }, [containerDimensions]);
-
-  // Tool sync
-  useEffect(() => {
-    setCurrentTool(defaultTool);
-  }, [defaultTool]);
+  // Callbacks live in a ref so a consumer passing inline arrow functions does
+  // not tear down and rebuild the tools on every render.
+  const callbacks = useRef({ onLoad, onError, onMeasureComplete });
+  callbacks.current = { onLoad, onError, onMeasureComplete };
 
   const material = useMemo(
     () => new THREE.LineBasicMaterial({ color: entityColor }),
     [entityColor]
   );
 
-  // Process DXF
-  const {
-    document,
-    group,
-    stats: processedStats,
-    entities,
-    parseError,
-    dxfHeader,
-    layers: processedLayers,
-    layerTable,
-  } = useMemo(() => {
-    return processDxf(dxfContent || "", material, showShapeColors, shapeColors);
-  }, [dxfContent, material, showShapeColors, shapeColors]);
+  // Still synchronous, still on the main thread — moving this to a worker is
+  // the next step. Nothing downstream assumes it is synchronous.
+  const processed = useMemo(
+    () => processDxf(dxfContent || "", material, showShapeColors, shapeColors),
+    [dxfContent, material, showShapeColors, shapeColors]
+  );
 
-  // Initial layer state
+  // --- core lifecycle: one per container, not one per prop change ----------
+
   useEffect(() => {
-    if (layerTable) {
-      const initialLayers = Object.entries(layerTable).map(([name, data]) => ({
-        name,
-        color: data.color,
-        visible: true,
-      }));
-      setLayers(initialLayers);
+    const container = containerRef.current;
+    if (!container) return; // Also covers SSR: no ref, no core.
+
+    let instance: DxfViewerCore;
+    try {
+      instance = new DxfViewerCore(container, {
+        backgroundColor,
+        showGrid,
+        showAxes,
+        interactive,
+      });
+    } catch (err) {
+      const failure =
+        err instanceof Error ? err : new Error("Failed to start the viewer");
+      setError(failure.message);
+      callbacks.current.onError?.(failure);
+      return;
     }
-  }, [layerTable]);
 
-  // Update stats state
+    instance.registerTool(new PanTool());
+    instance.registerTool(
+      new SelectTool(
+        (info) => {
+          setSelectedEntityInfo(info);
+          instance.emit("selection:change", {
+            ids: [],
+            primary: info,
+          });
+        },
+        (info, x, y) => setHoverInfo(info ? { info, x, y } : null)
+      )
+    );
+    instance.registerTool(
+      new MeasureTool(
+        (distance) => callbacks.current.onMeasureComplete?.(distance),
+        undefined,
+        (text) => setMeasureText(text)
+      )
+    );
+
+    setCore(instance);
+    return () => {
+      instance.dispose();
+      setCore(null);
+    };
+    // Constructed once. Later prop changes are applied through setOptions
+    // below rather than by rebuilding the viewer.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // --- props -> core -------------------------------------------------------
+
   useEffect(() => {
-    setStats(processedStats);
-    if (parseError) {
-      setError(
-        parseError instanceof Error ? parseError.message : "Failed to parse DXF"
-      );
-      onError?.(
-        parseError instanceof Error
-          ? parseError
-          : new Error("Failed to parse DXF")
-      );
+    core?.setOptions({ backgroundColor, showGrid, showAxes, interactive });
+  }, [core, backgroundColor, showGrid, showAxes, interactive]);
+
+  useEffect(() => {
+    if (!core) return;
+    // Re-processing the same file after a styling change should not throw the
+    // user's viewport away; loading a different file should re-frame.
+    core.setDocument(processed, core.getDocument().size > 0 && !!dxfContent);
+
+    setStats(processed.stats);
+    if (processed.parseError) {
+      setError(processed.parseError.message);
+      callbacks.current.onError?.(processed.parseError);
     } else {
       setError(null);
     }
-  }, [processedStats, parseError, onError]);
 
-  // Analyze Data
+    setLayers(
+      Object.entries(processed.layerTable).map(([name, data]) => ({
+        name,
+        color: data.color,
+        visible: core.isLayerVisible(name),
+      }))
+    );
+  }, [core, processed, dxfContent]);
+
+  useEffect(() => setCurrentTool(defaultTool), [defaultTool]);
+
   useEffect(() => {
-    if (dxfContent && entities) {
-      setAnalyzedData({
-        totalEntities: entities.length,
-        entityTypes: Object.entries(processedStats).map(([type, count]) => ({
-          type,
-          count,
-        })),
-        closedLoops: DxfAnalyzer.findClosedLoops({ entities }),
-        dxfHeader,
-      });
-      setIsLoaded(true);
-    }
-  }, [dxfContent, entities, processedStats, dxfHeader]);
+    core?.setTool(interactive ? currentTool : null);
+  }, [core, currentTool, interactive]);
 
-  // Setup Three.js
-  const { camera, center } = useMemo(() => {
-    if (!containerDimensions)
-      return { camera: null, center: new THREE.Vector3() };
-    return setupCamera({
-      containerWidth: containerDimensions.width,
-      containerHeight: containerDimensions.height,
-      group,
+  // --- core -> React -------------------------------------------------------
+
+  useEffect(() => {
+    if (!core) return;
+    const offLoaded = core.on("document:loaded", ({ stats: numericStats }) => {
+      callbacks.current.onLoad?.(numericStats);
     });
-  }, [group, containerDimensions]);
-
-  const renderer = useMemo(() => {
-    if (!isMounted || !containerDimensions) return null; // SSR guard
-    
-    // Verify Three.js is available
-    if (typeof THREE === 'undefined' || !THREE.WebGLRenderer) {
-      console.error("[DXF Viewer] Three.js is not available");
-      return null;
-    }
-    
-    try {
-      const renderer = new THREE.WebGLRenderer({
-        antialias: true,
-        powerPreference: "high-performance",
-        precision: "mediump",
-      });
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-      renderer.setSize(containerDimensions.width, containerDimensions.height);
-      
-      return renderer;
-    } catch (error) {
-      console.error("[DXF Viewer] Error creating WebGLRenderer:", error);
-      return null;
-    }
-  }, [containerDimensions]);
-
-  const scene = useMemo(() => {
-    // Use ref to ensure we're using the correct group instance
-    const currentGroup = groupRef.current || group;
-    
-    const newScene = setupScene({
-      backgroundColor,
-      showGrid,
-      showAxes,
-      group: currentGroup,
-      gridSize: 100,
-      axesSize: 50,
+    const offLayers = core.on("layers:change", () => {
+      setLayers((previous) =>
+        previous.map((layer) => ({
+          ...layer,
+          visible: core.isLayerVisible(layer.name),
+        }))
+      );
     });
-    
-    return newScene;
-  }, [backgroundColor, showGrid, showAxes, group]);
-
-  const controls = useMemo(() => {
-    if (!camera || !renderer) return null;
-    const controls = setupControls(camera, renderer, center);
-    // Disable controls if not interactive
-    if (!interactive && controls) {
-      controls.enabled = false;
-    }
-    return controls;
-  }, [camera, renderer, center, interactive]);
-
-  // Animation Loop
-  const animate = useCallback(() => {
-    if (
-      !cameraRef.current ||
-      !rendererRef.current ||
-      !sceneRef.current ||
-      !controlsRef.current
-    )
-      return;
-    animationFrameRef.current = requestAnimationFrame(animate);
-    if (interactive) {
-      controlsRef.current.update();
-      
-      // Force camera to look straight down (2D lock)
-      const camera = cameraRef.current;
-      if (camera.type === 'OrthographicCamera') {
-        const orthoCamera = camera as THREE.OrthographicCamera;
-        // Ensure camera is always positioned above the scene looking down
-        // Lock Z position to be positive (above the scene)
-        if (orthoCamera.position.z < 1) {
-          orthoCamera.position.z = 1;
-        }
-        // Force look at the target (which should be at z=0)
-        const target = controlsRef.current.target;
-        orthoCamera.lookAt(target);
-        // Ensure up vector is correct for 2D view
-        orthoCamera.up.set(0, 1, 0);
-      }
-    }
-    rendererRef.current.render(sceneRef.current, cameraRef.current);
-  }, [interactive]);
-
-  const handleResize = useCallback(() => {
-    if (!containerRef.current || !rendererRef.current || !cameraRef.current)
-      return;
-    const width = containerRef.current.clientWidth;
-    const height = containerRef.current.clientHeight;
-    const camera = cameraRef.current;
-
-    const aspect = width / height;
-    const currentHeight = camera.top - camera.bottom;
-    const newWidth = currentHeight * aspect;
-    const centerX = (camera.left + camera.right) / 2;
-
-    camera.left = centerX - newWidth / 2;
-    camera.right = centerX + newWidth / 2;
-    camera.updateProjectionMatrix();
-    rendererRef.current.setSize(width, height);
-  }, []);
-
-  // Tools Setup
-  const tools = useMemo(
-    () => ({
-      pan: new PanTool(),
-      select: new SelectTool(
-        (info) => setSelectedEntityInfo(info),
-        (info, x, y) => setHoverInfo(info ? { info, x, y } : null)
-      ),
-      measure: new MeasureTool(onMeasureComplete, undefined, (text) =>
-        setMeasureText(text)
-      ),
-    }),
-    [onMeasureComplete]
-  );
-
-  // Tool Activation/Deactivation
-  useEffect(() => {
-    if (!scene || !camera || !renderer || !controls || !group) return;
-    
-    if (!interactive) {
-      // Deactivate current tool if interactivity is disabled
-      if (activeTool) {
-        const toolContext = {
-          scene,
-          camera,
-          renderer,
-          controls,
-          group,
-          document,
-        };
-        activeTool.deactivate(toolContext);
-        setActiveTool(null);
-      }
-      return;
-    }
-    
-    const toolContext = { scene, camera, renderer, controls, group, document };
-
-    activeTool?.deactivate(toolContext);
-
-    const newTool = tools[currentTool];
-    newTool.activate(toolContext);
-    setActiveTool(newTool);
-
-    return () => newTool.deactivate(toolContext);
-  }, [currentTool, scene, camera, renderer, controls, group, document, tools, interactive, activeTool]);
-
-  // Event Listeners
-  const handleMouseDown = useCallback(
-    (event: MouseEvent) => {
-      if (!scene || !camera || !renderer || !controls || !group || !activeTool)
-        return;
-      activeTool.onMouseDown?.(event, {
-        scene,
-        camera,
-        renderer,
-        controls,
-        group,
-        document,
-      });
-    },
-    [scene, camera, renderer, controls, group, document, activeTool]
-  );
-
-  const handleMouseMove = useCallback(
-    (event: MouseEvent) => {
-      if (!scene || !camera || !renderer || !controls || !group || !activeTool)
-        return;
-      activeTool.onMouseMove?.(event, {
-        scene,
-        camera,
-        renderer,
-        controls,
-        group,
-        document,
-      });
-    },
-    [scene, camera, renderer, controls, group, document, activeTool]
-  );
-
-  const handleMouseUp = useCallback(
-    (event: MouseEvent) => {
-      if (!scene || !camera || !renderer || !controls || !group || !activeTool)
-        return;
-      activeTool.onMouseUp?.(event, {
-        scene,
-        camera,
-        renderer,
-        controls,
-        group,
-        document,
-      });
-    },
-    [scene, camera, renderer, controls, group, document, activeTool]
-  );
-
-  useEffect(() => {
-    const canvas = renderer?.domElement;
-    if (!canvas || !interactive) return; // Don't attach listeners if not interactive
-    canvas.addEventListener("mousedown", handleMouseDown);
-    canvas.addEventListener("mousemove", handleMouseMove);
-    canvas.addEventListener("mouseup", handleMouseUp);
     return () => {
-      canvas.removeEventListener("mousedown", handleMouseDown);
-      canvas.removeEventListener("mousemove", handleMouseMove);
-      canvas.removeEventListener("mouseup", handleMouseUp);
+      offLoaded();
+      offLayers();
     };
-  }, [renderer, handleMouseDown, handleMouseMove, handleMouseUp, interactive]);
+  }, [core]);
 
-  // Init Effect - wait for all dependencies to be ready
+  // Analysis is independent of rendering; it reads the parsed entities.
   useEffect(() => {
-    // Check if all dependencies are ready
-    const allReady = containerRef.current && camera && renderer && controls && scene;
-    
-    if (!allReady) {
+    if (!dxfContent || !processed.entities.length) {
+      setAnalyzedData(null);
       return;
     }
-    
-    const container = containerRef.current;
-    if (!container) return;
+    setAnalyzedData({
+      totalEntities: processed.entities.length,
+      entityTypes: Object.entries(processed.stats).map(([type, count]) => ({
+        type,
+        count,
+      })),
+      closedLoops: DxfAnalyzer.findClosedLoops({ entities: processed.entities }),
+      dxfHeader: processed.dxfHeader,
+    });
+  }, [dxfContent, processed]);
 
-    // Clear any existing content
-    while (container.firstChild) {
-      container.removeChild(container.firstChild);
-    }
-
-    try {
-      rendererRef.current = renderer;
-      sceneRef.current = scene;
-      cameraRef.current = camera;
-      controlsRef.current = controls;
-
-      container.appendChild(renderer.domElement);
-      
-      // Force initial render
-      renderer.render(scene, camera);
-      
-      // Find the DXF group (not the grid group)
-      const allGroups = scene.children.filter(c => c.type === 'Group');
-      const gridGroup = allGroups.find(g => g.userData?.isGrid || g.children.some(ch => ch.type === 'GridHelper'));
-      const dxfGroup = allGroups.find(g => g !== gridGroup);
-      
-      // Use the ref to ensure we're checking the correct group instance
-      const currentGroup = groupRef.current || group;
-      
-      // Verify the group we passed is actually in the scene
-      const groupInScene = scene.children.includes(currentGroup);
-      
-      // If group is not in scene, add it!
-      // This can happen due to React's render cycle timing - the fallback fixes it
-      if (!groupInScene && !dxfGroup) {
-        scene.add(currentGroup);
-        renderer.render(scene, camera);
-      }
-      
-      // Re-check entity count after potential fix
-      const finalDxfGroup = scene.children.find(c => c === currentGroup) || 
-                           scene.children.find(c => c.type === 'Group' && c.name === 'dxf-content-group') ||
-                           scene.children.filter(c => c.type === 'Group').find(g => {
-                             const isGrid = g.userData?.isGrid || g.children.some(ch => ch.type === 'GridHelper');
-                             return !isGrid;
-                           });
-      
-      let finalEntityCount = 0;
-      if (finalDxfGroup) {
-        finalEntityCount = finalDxfGroup.children.reduce((sum, layer) => {
-          const layerChildren = layer.children?.length || 0;
-          return sum + layerChildren;
-        }, 0);
-      }
-      
-      // Update the stats with correct entity count
-      if (finalEntityCount > 0) {
-        setStats(prev => ({ ...prev, totalEntities: finalEntityCount }));
-      }
-      
-      animate();
-      window.addEventListener("resize", handleResize);
-      
-      return () => {
-        window.removeEventListener("resize", handleResize);
-        if (animationFrameRef.current) {
-          cancelAnimationFrame(animationFrameRef.current);
-        }
-        // Clean up renderer
-        if (rendererRef.current) {
-          rendererRef.current.dispose();
-        }
-      };
-    } catch (error) {
-      console.error("[DXF Viewer] Error during initialization:", error);
-    }
-
-    if (onLoad && isLoaded) {
-      // Filter stats to only include numeric values
-      const numericStats: Record<string, number> = {};
-      Object.entries(processedStats).forEach(([key, value]) => {
-        if (typeof value === "number") {
-          numericStats[key] = value;
-        }
-      });
-      onLoad(numericStats);
-    }
-
-    return () => {
-      window.removeEventListener("resize", handleResize);
-      if (animationFrameRef.current)
-        cancelAnimationFrame(animationFrameRef.current);
-      renderer.dispose();
-      material.dispose();
-      group.traverse((obj) => {
-        if (obj instanceof THREE.Line) obj.geometry.dispose();
-      });
-      if (container.contains(renderer.domElement))
-        container.removeChild(renderer.domElement);
-    };
-  }, [
-    camera,
-    renderer,
-    controls,
-    scene,
-    animate,
-    handleResize,
-    material,
-    group,
-    onLoad,
-    isLoaded,
-    processedStats,
-  ]);
+  // --- imperative API ------------------------------------------------------
 
   const toggleLayer = useCallback(
-    (layerName: string) => {
-      setLayers((prev) =>
-        prev.map((layer) =>
-          layer.name === layerName
-            ? { ...layer, visible: !layer.visible }
-            : layer
-        )
-      );
-
-      if (processedLayers && processedLayers[layerName]) {
-        processedLayers[layerName].visible =
-          !processedLayers[layerName].visible;
-      }
-    },
-    [processedLayers]
+    (layerName: string) => core?.toggleLayer(layerName),
+    [core]
   );
 
-  const exportImage = useCallback((format: "png" | "jpeg" = "png") => {
-    if (!rendererRef.current || !sceneRef.current || !cameraRef.current)
-      return null;
+  const exportImage = useCallback(
+    (format: "png" | "jpeg" = "png", scale = 1) =>
+      core?.exportImage(format, scale) ?? null,
+    [core]
+  );
 
-    // Render one last time to ensure everything is up to date
-    rendererRef.current.render(sceneRef.current, cameraRef.current);
-
-    return rendererRef.current.domElement.toDataURL(`image/${format}`);
-  }, []);
+  const fitToContent = useCallback(() => core?.fitToContent(), [core]);
 
   return {
     containerRef,
@@ -568,14 +219,16 @@ export const useDxfViewer = ({
     layers,
     toggleLayer,
     exportImage,
-    // Expose internal instances for extension
-    scene: sceneRef.current,
-    camera: cameraRef.current,
-    renderer: rendererRef.current,
-    controls: controlsRef.current,
-    dxfEntities: entities,
-    dxfGroup: group,
+    fitToContent,
+    /** The viewer itself. Register a tool, subscribe to an event, drive it. */
+    core,
     /** Queryable model of the drawing: identity, derived geometry, lookups. */
-    document,
+    document: (core?.getDocument() ?? processed.document) as DxfDocument,
+    scene: core?.scene ?? null,
+    camera: core?.camera ?? null,
+    renderer: core?.renderer ?? null,
+    controls: core?.controls ?? null,
+    dxfEntities: processed.entities,
+    dxfGroup: processed.group,
   };
 };

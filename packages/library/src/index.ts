@@ -9,3 +9,13 @@ export type {
   EntityId,
   IndexedEntity,
 } from "./document/types";
+
+// Viewer core: owns the WebGL context, usable without React.
+export { DxfViewerCore } from "./core/DxfViewerCore";
+export type { CoreOptions } from "./core/DxfViewerCore";
+export { RenderScheduler } from "./core/RenderScheduler";
+export type { ViewerEventName, ViewerEvents } from "./core/events";
+
+// Tools.
+export { MeasureTool, PanTool, SelectTool } from "./tools";
+export type { Tool, ToolContext, ToolType } from "./tools/types";
