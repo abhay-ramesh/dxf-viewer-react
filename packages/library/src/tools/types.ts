@@ -3,6 +3,7 @@ import { CameraController } from "../core/CameraController";
 import { MeasurementModel } from "../core/MeasurementModel";
 import { SelectionModel } from "../core/SelectionModel";
 import { MeasurementRenderer } from "../core/MeasurementRenderer";
+import { HitTester } from "../core/HitTester";
 import { SnapService } from "../core/SnapService";
 import { DxfDocument } from "../document/DxfDocument";
 
@@ -23,6 +24,8 @@ export interface ToolContext {
   selection: SelectionModel;
   /** Significant points to snap to, zoom-aware. */
   snapping: SnapService;
+  /** What is under a point, via the document's spatial index. */
+  hitTesting: HitTester;
   /** Recorded measurements. */
   measurements: MeasurementModel;
   /** Draws the recorded measurements and the in-progress rubber band. */

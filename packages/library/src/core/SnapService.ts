@@ -173,46 +173,36 @@ function candidatesFor(
   worldOffset: THREE.Vector3
 ): Candidate[] {
   const out: Candidate[] = [];
-  const object = entity.object as THREE.Line | THREE.Mesh;
-  const geometry = object.geometry;
-  if (!geometry) return out;
-
-  const push = (point: THREE.Vector3, type: SnapType) => {
-    out.push({ x: point.x, y: point.y, z: point.z, type, entityId: entity.id });
+  const push = (x: number, y: number, type: SnapType) => {
+    out.push({
+      x: x + worldOffset.x,
+      y: y + worldOffset.y,
+      z: 0,
+      type,
+      entityId: entity.id,
+    });
   };
 
-  const positions = geometry.getAttribute("position");
-  if (positions) {
-    object.updateMatrixWorld();
-    const isLoop = object instanceof THREE.LineLoop;
-    const stride = object instanceof THREE.LineSegments ? 2 : 1;
-
-    const at = (i: number) =>
-      new THREE.Vector3()
-        .fromBufferAttribute(positions, i)
-        .applyMatrix4(object.matrixWorld);
-
-    for (let i = 0; i < positions.count; i++) push(at(i), "endpoint");
-
-    const segments = isLoop ? positions.count : positions.count - 1;
-    for (let i = 0; i < segments; i += stride) {
-      const a = at(i);
-      const b = at((i + 1) % positions.count);
-      push(a.clone().add(b).multiplyScalar(0.5), "midpoint");
-    }
+  // Read the entity's own flattened segments rather than its rendered
+  // object: with batching there is no per-entity object left to read.
+  const segments = entity.derived.segments;
+  for (let i = 0; i + 3 < segments.length; i += 4) {
+    const ax = segments[i];
+    const ay = segments[i + 1];
+    const bx = segments[i + 2];
+    const by = segments[i + 3];
+    push(ax, ay, "endpoint");
+    push(bx, by, "endpoint");
+    push((ax + bx) / 2, (ay + by) / 2, "midpoint");
   }
 
   const { radius, center } = entity.derived;
   if (center && typeof radius === "number") {
-    // Derived geometry is in document space; the cursor arrives in world
-    // space. The document records exactly this translation, so there is no
-    // need to go fishing in the scene graph for it.
-    const worldCenter = center.clone().add(worldOffset);
-    push(worldCenter, "center");
-    push(new THREE.Vector3(worldCenter.x + radius, worldCenter.y, worldCenter.z), "quadrant");
-    push(new THREE.Vector3(worldCenter.x - radius, worldCenter.y, worldCenter.z), "quadrant");
-    push(new THREE.Vector3(worldCenter.x, worldCenter.y + radius, worldCenter.z), "quadrant");
-    push(new THREE.Vector3(worldCenter.x, worldCenter.y - radius, worldCenter.z), "quadrant");
+    push(center.x, center.y, "center");
+    push(center.x + radius, center.y, "quadrant");
+    push(center.x - radius, center.y, "quadrant");
+    push(center.x, center.y + radius, "quadrant");
+    push(center.x, center.y - radius, "quadrant");
   }
 
   return out;

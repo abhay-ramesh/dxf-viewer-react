@@ -48,6 +48,47 @@ function documentSpacePoints(object: THREE.Object3D): THREE.Vector3[] {
 }
 
 /**
+ * Flatten an entity into disjoint line segments, in document space.
+ *
+ * This one array is what hit-testing, snapping and batched rendering all read
+ * from. Keeping it per entity — rather than reading back from the rendered
+ * object — is what lets the renderer merge a thousand entities into one
+ * buffer without any of those three losing track of which entity is which.
+ *
+ * Layout is flat pairs: [ax, ay, bx, by, ...], two vertices per segment.
+ */
+function toSegments(points: THREE.Vector3[], closed: boolean): Float32Array {
+  if (points.length < 2) return new Float32Array(0);
+
+  const segmentCount = closed ? points.length : points.length - 1;
+  const out = new Float32Array(segmentCount * 4);
+  for (let i = 0; i < segmentCount; i++) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length];
+    out[i * 4] = a.x;
+    out[i * 4 + 1] = a.y;
+    out[i * 4 + 2] = b.x;
+    out[i * 4 + 3] = b.y;
+  }
+  return out;
+}
+
+/** Disjoint pairs stay pairs; a strip would be wrong to close or chain. */
+function pairsToSegments(points: THREE.Vector3[]): Float32Array {
+  const segmentCount = Math.floor(points.length / 2);
+  const out = new Float32Array(segmentCount * 4);
+  for (let i = 0; i < segmentCount; i++) {
+    const a = points[i * 2];
+    const b = points[i * 2 + 1];
+    out[i * 4] = a.x;
+    out[i * 4 + 1] = a.y;
+    out[i * 4 + 2] = b.x;
+    out[i * 4 + 3] = b.y;
+  }
+  return out;
+}
+
+/**
  * Compute every geometry fact a consumer might ask for, once, at build time.
  *
  * This replaces re-deriving length from buffer attributes and centre from a
@@ -66,11 +107,16 @@ export function deriveGeometry(
     ? new THREE.Vector3()
     : bbox.getCenter(new THREE.Vector3());
 
+  const closed = isClosedLoop || object instanceof THREE.LineLoop;
   const derived: DerivedGeometry = {
     bbox,
     center,
     vertexCount: points.length,
-    closed: isClosedLoop || object instanceof THREE.LineLoop,
+    closed,
+    segments:
+      object instanceof THREE.LineSegments
+        ? pairsToSegments(points)
+        : toSegments(points, object instanceof THREE.LineLoop),
   };
 
   if (points.length > 1) {
@@ -128,5 +174,26 @@ export function deriveMeshGeometry(mesh: THREE.Mesh): DerivedGeometry {
     area: (mesh.userData.outerArea as number) ?? undefined,
     length: (mesh.userData.perimeter as number) ?? undefined,
     closed: true,
+    // A filled area has no outline to be near: you are either inside it or
+    // you are not, so it carries triangles rather than segments.
+    segments: new Float32Array(0),
+    triangles: toTriangles(mesh),
   };
+}
+
+/** Flatten a mesh into [ax, ay, bx, by, cx, cy, ...] in document space. */
+function toTriangles(mesh: THREE.Mesh): Float32Array {
+  const geometry = mesh.geometry;
+  const positions = geometry?.getAttribute("position");
+  if (!positions) return new Float32Array(0);
+
+  const index = geometry.getIndex();
+  const count = index ? index.count : positions.count;
+  const out = new Float32Array(count * 2);
+  for (let i = 0; i < count; i++) {
+    const vertex = index ? index.getX(i) : i;
+    out[i * 2] = positions.getX(vertex) + mesh.position.x;
+    out[i * 2 + 1] = positions.getY(vertex) + mesh.position.y;
+  }
+  return out;
 }

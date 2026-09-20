@@ -5,6 +5,7 @@ import { EntityId } from "../document/types";
 import { ProcessDxfResult } from "../processDxf";
 import { CameraController } from "./CameraController";
 import { StyleResolver } from "../style/StyleResolver";
+import { HitTester } from "./HitTester";
 import { MeasurementModel } from "./MeasurementModel";
 import { MeasurementRenderer } from "./MeasurementRenderer";
 import { SelectionModel } from "./SelectionModel";
@@ -87,6 +88,8 @@ export class DxfViewerCore {
   readonly selection: SelectionModel;
   /** Significant points to snap to. Shared by every precision feature. */
   readonly snapping = new SnapService();
+  /** What is under a point. Backed by a grid over entity bounding boxes. */
+  readonly hitTesting = new HitTester();
   /** Recorded measurements, in drawing coordinates and with units. */
   readonly measurements: MeasurementModel;
   private readonly measurementRenderer = new MeasurementRenderer();
@@ -222,6 +225,7 @@ export class DxfViewerCore {
     this.layerGroups = result.layers;
     this.selection.retarget(this.document, this.style);
     this.snapping.setDocument(this.document);
+    this.hitTesting.setDocument(this.document);
     this.measurements.setUnits(
       typeof result.stats.DXF_UNITS === "string"
         ? result.stats.DXF_UNITS
@@ -384,6 +388,7 @@ export class DxfViewerCore {
       document: this.document,
       selection: this.selection,
       snapping: this.snapping,
+      hitTesting: this.hitTesting,
       measurements: this.measurements,
       measurementRenderer: this.measurementRenderer,
       viewportHeight: this.viewportSize().height,

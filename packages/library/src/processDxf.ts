@@ -25,6 +25,7 @@ import {
 import { DxfAnalyzer } from "./utils/DxfAnalyzer";
 import { DxfDocument } from "./document/DxfDocument";
 import { deriveGeometry, deriveMeshGeometry } from "./document/derive";
+import { BatchResult, buildBatches } from "./render/BatchBuilder";
 import { rehydrateLoops } from "./pipeline/prepare";
 import { PreparedDrawing } from "./pipeline/types";
 import { StyleResolver } from "./style/StyleResolver";
@@ -1498,6 +1499,13 @@ export interface ProcessOptions {
   /** Build filled meshes for detected closed loops. */
   showShapeColors?: boolean;
   /**
+   * Merge entities into one buffer per layer (default: true).
+   *
+   * Set false to keep one object per entity, which is slower to draw but
+   * easier to inspect in a debugger or a Three.js scene explorer.
+   */
+  batching?: boolean;
+  /**
    * Parse and analysis output from {@link prepareDrawing}.
    *
    * Supplying it skips both phases here, which is what lets them run
@@ -1510,7 +1518,7 @@ export function processDxf(
   dxfContent: string,
   options: ProcessOptions
 ): ProcessDxfResult {
-  const { style, showShapeColors = true, prepared } = options;
+  const { style, showShapeColors = true, prepared, batching = true } = options;
   const totalStartTime = performance.now();
 
   // Parse DXF
@@ -1605,7 +1613,7 @@ export function processDxf(
   const entityProcessingStartTime = performance.now();
 
   const stats: Record<string, number | string> = {};
-  const layers: Record<string, THREE.Group> = {};
+  let layers: Record<string, THREE.Group> = {};
   const layerTable: Record<string, { color: number; colorIndex?: number }> = {};
 
   // Identity is assigned here, at the single point where entities become
@@ -1620,7 +1628,8 @@ export function processDxf(
   const indexFillMesh = (
     mesh: THREE.Mesh,
     layer: string,
-    type: string
+    type: string,
+    shapeIndex: number
   ): void => {
     const id = `f${nextEntityId++}`;
     mesh.userData.id = id;
@@ -1631,6 +1640,7 @@ export function processDxf(
       source: { type, layer } as IEntity,
       object: mesh,
       derived: deriveMeshGeometry(mesh),
+      shapeIndex,
     });
   };
 
@@ -1921,7 +1931,7 @@ export function processDxf(
             layers[layerName].userData = { name: layerName };
           }
           layers[layerName].add(shapeMesh);
-          indexFillMesh(shapeMesh, layerName, "SHAPE_WITH_HOLES");
+          indexFillMesh(shapeMesh, layerName, "SHAPE_WITH_HOLES", index);
 
           objects.push(shapeMesh);
         }
@@ -1960,7 +1970,7 @@ export function processDxf(
               layers[layerName].userData = { name: layerName };
             }
             layers[layerName].add(fallbackMesh);
-            indexFillMesh(fallbackMesh, layerName, "SHAPE_FILL");
+            indexFillMesh(fallbackMesh, layerName, "SHAPE_FILL", index);
 
             objects.push(fallbackMesh);
           }
@@ -1976,20 +1986,41 @@ export function processDxf(
     // Skip shape creation when colors are disabled for better performance
   }
 
+  // Merge the per-entity objects into one buffer per layer.
+  //
+  // The objects built above are what derived geometry was read from; from
+  // here on they are scaffolding. Everything downstream — picking, snapping,
+  // selection — reads the document, not the scene graph, so the scene graph
+  // is free to be whatever draws fastest.
+  let batchResult: BatchResult | null = null;
+  if (batching) {
+    batchResult = buildBatches(document, style);
+    for (const entity of document.all()) {
+      const range = batchResult.ranges.get(entity.id);
+      if (range) {
+        entity.object = range.batch.object;
+        entity.batchRange = range;
+      }
+    }
+    // The scaffolding objects are no longer referenced by anything.
+    Object.values(layers).forEach((layerGroup) => {
+      layerGroup.children.forEach((child) => {
+        (child as Partial<THREE.Mesh>).geometry?.dispose();
+      });
+      layerGroup.clear();
+    });
+    layers = batchResult.layers;
+  }
+
   // Create main group and add layer groups
   const group = new THREE.Group();
-  
+
   Object.values(layers).forEach((layerGroup) => {
     if (layerGroup && layerGroup.children.length > 0) {
       group.add(layerGroup);
     }
   });
   
-  const totalInGroup = group.children.reduce((sum, layer) => sum + (layer.children?.length || 0), 0);
-  
-  if (totalInGroup !== objects.length) {
-    console.error(`[DXF Viewer] MISMATCH: ${objects.length} objects created but only ${totalInGroup} in group!`);
-  }
 
   // Position the DXF content so its left bottom point is at the origin
   const box = new THREE.Box3().setFromObject(group);

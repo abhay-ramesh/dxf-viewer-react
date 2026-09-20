@@ -2,10 +2,13 @@ import { describe, expect, it } from "bun:test";
 import * as THREE from "three";
 import { SelectionModel } from "../src/core/SelectionModel";
 import { StyleResolver } from "../src/style/StyleResolver";
-import { loadDemoFixture, loadFixture, run } from "./helpers";
+import { batchColorOf, loadDemoFixture, loadFixture, run } from "./helpers";
 
 async function model(fixture = "minimal.dxf") {
-  const style = new StyleResolver();
+  // A selection colour the fixture does not already use, so "did the colour
+  // change" is a meaningful question. (Layer WALLS is ACI 1, red — which is
+  // also the default selection colour.)
+  const style = new StyleResolver({ selectionColor: 0x00ffff });
   const { document } = run(await loadFixture(fixture), true);
   let changes = 0;
   const selection = new SelectionModel(document, style, () => changes++);
@@ -112,29 +115,41 @@ describe("SelectionModel — derived appearance", () => {
     expect(selection.stateOf(a)).toBe("selected");
   });
 
-  it("restyles the object on select and restores it on clear", async () => {
+  it("repaints the entity's vertices on select and restores them on clear", async () => {
     const { selection, document } = await model();
     const entity = [...document.all()][0];
-    const object = entity.object as THREE.Line;
-    const base = object.material;
+    const base = batchColorOf(entity);
+    expect(base).not.toBeNull();
 
     selection.set([entity.id]);
-    expect(object.material).not.toBe(base);
+    expect(batchColorOf(entity)).not.toBe(base);
 
     selection.clear();
-    expect(object.material).toBe(base);
+    expect(batchColorOf(entity)).toBe(base);
   });
 
-  it("restores the base material after hover as well", async () => {
+  it("restores the base colour after hover as well", async () => {
     const { selection, document } = await model();
     const entity = [...document.all()][0];
-    const object = entity.object as THREE.Line;
-    const base = object.material;
+    const base = batchColorOf(entity);
 
     selection.setHovered(entity.id);
-    expect(object.material).not.toBe(base);
+    expect(batchColorOf(entity)).not.toBe(base);
     selection.setHovered(null);
-    expect(object.material).toBe(base);
+    expect(batchColorOf(entity)).toBe(base);
+  });
+
+  it("touches only the selected entity's slice of the shared buffer", async () => {
+    const { selection, document } = await model();
+    const entities = [...document.all()].filter((e) => e.batchRange);
+    const target = entities[0];
+    const neighbour = entities.find(
+      (e) => e.batchRange!.batch === target.batchRange!.batch && e !== target
+    )!;
+    const neighbourBefore = batchColorOf(neighbour);
+
+    selection.set([target.id]);
+    expect(batchColorOf(neighbour)).toBe(neighbourBefore);
   });
 
   it("uses the configured selection colour", async () => {
@@ -144,19 +159,33 @@ describe("SelectionModel — derived appearance", () => {
     const entity = [...document.all()][0];
 
     selection.set([entity.id]);
-    const material = (entity.object as THREE.Line)
-      .material as THREE.LineBasicMaterial;
-    expect(material.color.getHex()).toBe(0x00ffff);
+    expect(batchColorOf(entity)).toBe(0x00ffff);
   });
 
-  it("does not leak materials across repeated selections", async () => {
+  it("still swaps materials when batching is off", async () => {
+    const { document } = run(await loadFixture("minimal.dxf"), true, {}, false);
+    const selection = new SelectionModel(
+      document,
+      new StyleResolver(),
+      () => {}
+    );
+    const entity = [...document.all()][0];
+    const object = entity.object as THREE.Line;
+    const base = object.material;
+
+    selection.set([entity.id]);
+    expect(object.material).not.toBe(base);
+    selection.clear();
+    expect(object.material).toBe(base);
+  });
+
+  it("creates no materials at all when batching, however much you churn", async () => {
     const { selection, document, style } = await model();
     const ids = [...document.all()].map((e) => e.id);
     for (let i = 0; i < 20; i++) {
       selection.set([ids[i % ids.length]]);
     }
-    // Materials are shared by appearance, so churning the selection creates
-    // at most one extra per distinct look, not one per call.
-    expect(style.materialCount).toBeLessThan(10);
+    // Batched selection writes colours, not materials.
+    expect(style.materialCount).toBe(0);
   });
 });

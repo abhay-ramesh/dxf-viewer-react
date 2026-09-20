@@ -29,7 +29,13 @@ export { CameraController } from "./core/CameraController";
 export type { CameraControllerOptions } from "./core/CameraController";
 export { classifyWheel, DeviceHeuristic, pixelDelta } from "./core/gestures";
 export type { WheelBehavior, WheelIntent, WheelLike } from "./core/gestures";
+export { HitTester, distanceToSegments, pointInTriangles } from "./core/HitTester";
+export type { Hit } from "./core/HitTester";
 export { SnapService } from "./core/SnapService";
+export { buildBatches, paintEntity } from "./render/BatchBuilder";
+export type { Batch, BatchRange, BatchResult } from "./render/BatchBuilder";
+export { BoxIndex } from "./utils/BoxIndex";
+export type { Box } from "./utils/BoxIndex";
 export type { SnapOptions } from "./core/SnapService";
 export {
   MeasurementModel,

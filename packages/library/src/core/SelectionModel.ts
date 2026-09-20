@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { DxfDocument } from "../document/DxfDocument";
 import { EntityId } from "../document/types";
+import { paintEntity } from "../render/BatchBuilder";
 import { StyleResolver } from "../style/StyleResolver";
 import { InteractionState } from "../style/types";
 
@@ -123,6 +124,13 @@ export class SelectionModel {
   private refresh(id: EntityId): void {
     const entity = this.document.get(id);
     if (!entity) return;
+
+    // Batched: rewrite this entity's slice of the shared colour attribute.
+    // Costs that entity's vertices, however many entities share the buffer.
+    if (entity.batchRange) {
+      paintEntity(entity, entity.batchRange, this.style, this.stateOf(id));
+      return;
+    }
 
     const target = entity.object as THREE.Mesh | THREE.Line;
     if (!target.material) return;

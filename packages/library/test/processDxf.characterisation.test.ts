@@ -30,20 +30,24 @@ describe("processDxf — minimal fixture", () => {
     // block LINE live on 0. Shape-fill meshes are added into the same layer
     // groups alongside the entity objects, so WALLS also holds the fill(s)
     // generated for its closed polyline.
-    // WALLS: 2 LINE + 1 LWPOLYLINE + 2 fill meshes.
-    // 0: CIRCLE + ARC + the expanded block LINE + 1 fill mesh (the circle).
-    expect(layers["WALLS"].children.length).toBe(5);
-    expect(layers["0"].children.length).toBe(4);
+    // Entities are merged per layer, so a layer holds at most two objects:
+    // one batch of strokes and one of fills. Without batching it would hold
+    // one object per entity.
+    expect(layers["WALLS"].children.length).toBe(2);
+    expect(layers["0"].children.length).toBe(2);
+
+    const unbatched = run(await loadFixture("minimal.dxf"), true, {}, false);
+    expect(unbatched.layers["WALLS"].children.length).toBe(5);
+    expect(unbatched.layers["0"].children.length).toBe(4);
   });
 
   it("expands INSERT by instantiating block entities with the insert transform", async () => {
-    const { layers } = run(await loadFixture("minimal.dxf"));
-    const blockLine = layers["0"].children.find(
-      (c) => c.userData.entityType === "LINE"
-    );
+    const { document } = run(await loadFixture("minimal.dxf"));
+    const blockLine = document.filter((e) => e.blockName === "MARKER")[0];
     expect(blockLine).toBeDefined();
-    // Block-local line runs (0,0)->(2,0); inserted at (50,50).
-    const box = worldBox(blockLine!);
+    // Block-local line runs (0,0)->(2,0); inserted at (50,50). Read from the
+    // document rather than the scene: the scene is now merged buffers.
+    const box = blockLine.derived.bbox;
     expect(box.min.x).toBeCloseTo(50, 5);
     expect(box.max.x).toBeCloseTo(52, 5);
     expect(box.min.y).toBeCloseTo(50, 5);
@@ -82,10 +86,16 @@ describe("processDxf — demo fixture (345 KB, 940 entities)", () => {
     expect(stats.CIRCLE).toBe(2);
   });
 
-  it("produces one renderable object per entity plus shape fills", async () => {
-    const { group } = run(await loadDemoFixture());
-    // Characterisation, not aspiration: 977 draw calls for 31k vertices is
-    // the batching opportunity. Update deliberately when batching lands.
+  it("merges 977 entities into two draw calls", async () => {
+    const { group, document } = run(await loadDemoFixture());
+    expect(document.size).toBe(977);
+    // One stroke batch and one fill batch. Before batching this was 977
+    // objects for the same 977 entities.
+    expect(renderables(group).length).toBe(2);
+  });
+
+  it("still draws one object per entity when batching is off", async () => {
+    const { group } = run(await loadDemoFixture(), true, {}, false);
     expect(renderables(group).length).toBe(977);
   });
 
@@ -110,8 +120,10 @@ describe("processDxf — demo fixture (345 KB, 940 entities)", () => {
   });
 
   it("omits shape fills when showShapeColors is false", async () => {
-    const withFills = renderables(run(await loadDemoFixture(), true).group).length;
-    const without = renderables(run(await loadDemoFixture(), false).group).length;
-    expect(without).toBeLessThan(withFills);
+    const withFills = run(await loadDemoFixture(), true);
+    const without = run(await loadDemoFixture(), false);
+    expect(without.document.size).toBeLessThan(withFills.document.size);
+    // One batch instead of two: strokes only.
+    expect(renderables(without.group).length).toBe(1);
   });
 });

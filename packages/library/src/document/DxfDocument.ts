@@ -39,8 +39,12 @@ export class DxfDocument {
   }
 
   /**
-   * Resolve a raycast hit back to its entity, walking up through any grouping
-   * the renderer introduced.
+   * Resolve a rendered object back to its entity.
+   *
+   * Only meaningful when batching is off. With batching on, many entities
+   * share one object, so this cannot answer the question and picking goes
+   * through `HitTester` instead — which is the point: the scene graph stops
+   * being the source of truth about identity.
    */
   fromObject(object: THREE.Object3D | null): IndexedEntity | undefined {
     let current: THREE.Object3D | null = object;

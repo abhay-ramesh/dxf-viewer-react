@@ -16,12 +16,30 @@ export async function loadDemoFixture(): Promise<string> {
 export function run(
   content: string,
   showShapeColors = true,
-  style: StyleOptions = {}
+  style: StyleOptions = {},
+  batching = true
 ) {
   return processDxf(content, {
     style: new StyleResolver(style),
     showShapeColors,
+    batching,
   });
+}
+
+/** The colour actually written into a batch for one entity's first vertex. */
+export function batchColorOf(entity: {
+  batchRange?: { batch: { colors: { array: ArrayLike<number> } }; start: number };
+}): number | null {
+  const range = entity.batchRange;
+  if (!range) return null;
+  const array = range.batch.colors.array;
+  const offset = range.start * 3;
+  const to255 = (v: number) => Math.round(v * 255);
+  return (
+    (to255(array[offset]) << 16) |
+    (to255(array[offset + 1]) << 8) |
+    to255(array[offset + 2])
+  );
 }
 
 /** Every object in the scene graph that would issue a draw call. */
