@@ -12,6 +12,8 @@ export type {
 
 // Document model: stable entity identity, derived geometry, and lookups.
 export { DxfDocument } from "./document/DxfDocument";
+export { DrawingReport } from "./document/DrawingReport";
+export type { Omission, OmissionReason } from "./document/DrawingReport";
 export type {
   DerivedGeometry,
   EntityId,

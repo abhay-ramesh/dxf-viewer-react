@@ -8,6 +8,8 @@ export { LoadingIndicator } from "./LoadingIndicator";
 export type { LoadingIndicatorProps } from "./LoadingIndicator";
 export { MeasureReadout } from "./MeasureReadout";
 export type { MeasureReadoutProps } from "./MeasureReadout";
+export { OmissionNotice } from "./OmissionNotice";
+export type { OmissionNoticeProps } from "./OmissionNotice";
 export { StatsOverlay } from "./StatsOverlay";
 export type { StatsOverlayProps } from "./StatsOverlay";
 export { Toolbar } from "./Toolbar";

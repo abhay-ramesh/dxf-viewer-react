@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { DxfViewerCore } from "./core/DxfViewerCore";
+import { DrawingReport } from "./document/DrawingReport";
 import { Measurement } from "./core/MeasurementModel";
 import { FrameStats } from "./core/PerformanceMonitor";
 import { StyleResolver } from "./style/StyleResolver";
@@ -58,6 +59,7 @@ export const useDxfViewer = ({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [frameStats, setFrameStats] = useState<FrameStats | null>(null);
   const [processed, setProcessed] = useState<ProcessDxfResult | null>(null);
+  const [report, setReport] = useState<DrawingReport | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [progress, setProgress] = useState<LoadProgress | null>(null);
   const [measureText, setMeasureText] = useState<string | null>(null);
@@ -193,6 +195,7 @@ export const useDxfViewer = ({
         // the viewport away; loading a different file should re-frame.
         core.setDocument(result, core.getDocument().size > 0 && !!dxfContent);
         setProcessed(result);
+        setReport(result.report);
         setStats(result.stats);
 
         if (result.parseError) {
@@ -323,6 +326,8 @@ export const useDxfViewer = ({
     /** Zoom-aware snapping, shared by every precision feature. */
     snapping: core?.snapping ?? null,
     stats,
+    /** What could not be drawn, and why. Null until a drawing is loaded. */
+    report,
     /** Live frame timing and renderer counters, when showStats is on. */
     frameStats,
     analyzedData,

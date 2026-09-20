@@ -6,6 +6,7 @@ import { ErrorBanner } from "./ui/ErrorBanner";
 import { HoverTooltip } from "./ui/HoverTooltip";
 import { LoadingIndicator } from "./ui/LoadingIndicator";
 import { MeasureReadout } from "./ui/MeasureReadout";
+import { OmissionNotice } from "./ui/OmissionNotice";
 import { StatsOverlay } from "./ui/StatsOverlay";
 import { Toolbar, ToolbarItem } from "./ui/Toolbar";
 
@@ -45,6 +46,7 @@ export const DxfViewer: React.FC<DxfViewerProps> = (props) => {
     measurementModel,
     stats,
     frameStats,
+    report,
     isLoading,
     progress,
     error,
@@ -113,6 +115,7 @@ export const DxfViewer: React.FC<DxfViewerProps> = (props) => {
               />
 
               <StatsOverlay stats={frameStats} />
+              <OmissionNotice report={report} placement="bottom-right" />
               <LoadingIndicator loading={isLoading} progress={progress} />
               <ErrorBanner error={error} />
             </>

@@ -249,6 +249,7 @@ export class DxfViewerCore {
       this.emitter.emit("document:loaded", {
         entityCount: this.document.size,
         stats: numericOnly(result.stats),
+        report: result.report,
       });
     }
     this.invalidate();

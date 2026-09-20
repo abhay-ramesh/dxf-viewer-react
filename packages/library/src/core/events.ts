@@ -1,5 +1,6 @@
 import { EntityId } from "../document/types";
 import { EntityInfo } from "../types";
+import { DrawingReport } from "../document/DrawingReport";
 import { Measurement } from "./MeasurementModel";
 import { FrameStats } from "./PerformanceMonitor";
 
@@ -11,7 +12,12 @@ import { FrameStats } from "./PerformanceMonitor";
  * component and no new state in the hook.
  */
 export interface ViewerEvents {
-  "document:loaded": { entityCount: number; stats: Record<string, number> };
+  "document:loaded": {
+    entityCount: number;
+    stats: Record<string, number>;
+    /** What could not be drawn, and why. */
+    report: DrawingReport;
+  };
   "document:error": { error: Error };
   "selection:change": { ids: EntityId[]; primary: EntityInfo | null };
   "hover:change": { id: EntityId | null; info: EntityInfo | null; x: number; y: number };
