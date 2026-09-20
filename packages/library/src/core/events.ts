@@ -1,5 +1,6 @@
 import { EntityId } from "../document/types";
 import { EntityInfo } from "../types";
+import { FrameStats } from "./PerformanceMonitor";
 
 /**
  * Everything the core announces.
@@ -18,6 +19,8 @@ export interface ViewerEvents {
   "tool:change": { tool: string };
   "camera:change": Record<string, never>;
   "layers:change": Record<string, never>;
+  /** Frame timing and renderer counters. Only emitted while monitoring. */
+  "stats:frame": FrameStats;
 }
 
 export type ViewerEventName = keyof ViewerEvents;

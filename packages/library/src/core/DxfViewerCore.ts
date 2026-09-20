@@ -8,6 +8,7 @@ import { StyleResolver } from "../style/StyleResolver";
 import { SelectionModel } from "./SelectionModel";
 import { Tool, ToolContext, ToolType } from "../tools/types";
 import { Emitter, ViewerEventName, ViewerEvents } from "./events";
+import { FrameStats, PerformanceMonitor } from "./PerformanceMonitor";
 import { RenderScheduler } from "./RenderScheduler";
 
 export interface CoreOptions {
@@ -54,6 +55,8 @@ export class DxfViewerCore {
 
   private readonly emitter = new Emitter();
   private readonly scheduler: RenderScheduler;
+  private readonly monitor = new PerformanceMonitor();
+  private statsTimer: ReturnType<typeof setInterval> | null = null;
   private readonly resizeObserver: ResizeObserver | null = null;
 
   /** Everything that is not drawing content: grid, axes. */
@@ -144,7 +147,14 @@ export class DxfViewerCore {
       if (this.controls.enableDamping && this.scheduler.isHeld) {
         this.controls.update();
       }
+      this.monitor.beginFrame();
       this.renderer.render(this.scene, this.camera);
+      if (this.statsTimer !== null) {
+        this.emitter.emit(
+          "stats:frame",
+          this.monitor.endFrame(this.renderer, this.document.size)
+        );
+      }
     });
 
     // A control interaction needs frames while it runs, and exactly one more
@@ -480,6 +490,35 @@ export class DxfViewerCore {
     this.emitter.emit(event, payload);
   }
 
+  // ------------------------------------------------------------ monitoring
+
+  /**
+   * Start reporting frame statistics on `stats:frame`.
+   *
+   * Off by default: reading `renderer.info` every frame and pushing an event
+   * into React is a cost the common case should not pay. The timer exists so
+   * the readout can fall back to "idle" instead of freezing on the last
+   * frame's numbers, which on an on-demand renderer is most of the time.
+   */
+  startMonitoring(intervalMs = 250): () => void {
+    this.stopMonitoring();
+    this.statsTimer = setInterval(() => {
+      this.emitter.emit("stats:frame", this.monitor.sample());
+    }, intervalMs);
+    this.invalidate();
+    return () => this.stopMonitoring();
+  }
+
+  stopMonitoring(): void {
+    if (this.statsTimer !== null) clearInterval(this.statsTimer);
+    this.statsTimer = null;
+    this.monitor.reset();
+  }
+
+  get frameStats(): FrameStats {
+    return this.monitor.stats;
+  }
+
   /** Ask for a frame. Safe to call from anywhere, including tools. */
   invalidate(): void {
     this.scheduler.invalidate();
@@ -492,6 +531,7 @@ export class DxfViewerCore {
     this.disposed = true;
 
     this.releaseContinuous?.();
+    this.stopMonitoring();
     this.scheduler.dispose();
     this.resizeObserver?.disconnect();
     this.activeTool?.deactivate(this.toolContext());

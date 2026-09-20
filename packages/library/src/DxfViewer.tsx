@@ -1,4 +1,5 @@
 import React from "react";
+import { StatsOverlay } from "./StatsOverlay";
 import { DxfViewerProps } from "./types";
 import { useDxfViewer } from "./useDxfViewer";
 
@@ -11,6 +12,7 @@ export const DxfViewer: React.FC<DxfViewerProps> = (props) => {
     selectedEntityInfo,
     measureText,
     stats,
+    frameStats,
     error,
   } = useDxfViewer(props);
 
@@ -33,6 +35,8 @@ export const DxfViewer: React.FC<DxfViewerProps> = (props) => {
       }}
     >
       <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
+
+      <StatsOverlay stats={frameStats} />
 
       {/* Tool buttons - only show when interactive */}
       {interactive && (

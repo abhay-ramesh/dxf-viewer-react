@@ -1,4 +1,6 @@
 export { DxfViewer } from "./DxfViewer";
+export { StatsOverlay } from "./StatsOverlay";
+export type { StatsOverlayProps } from "./StatsOverlay";
 export { useDxfViewer } from "./useDxfViewer";
 export type {
   AnalyzedData,
@@ -19,6 +21,8 @@ export type {
 export { DxfViewerCore } from "./core/DxfViewerCore";
 export type { CoreOptions } from "./core/DxfViewerCore";
 export { RenderScheduler } from "./core/RenderScheduler";
+export { PerformanceMonitor } from "./core/PerformanceMonitor";
+export type { FrameStats } from "./core/PerformanceMonitor";
 export { SelectionModel } from "./core/SelectionModel";
 export type { ViewerEventName, ViewerEvents } from "./core/events";
 

@@ -1,4 +1,4 @@
-import { useDxfViewer } from "dxf-viewer-react";
+import { StatsOverlay, useDxfViewer } from "dxf-viewer-react";
 import { ChevronLeft, Move, Ruler, Upload } from "lucide-react";
 import React, { useEffect, useState } from "react";
 import "../App.css";
@@ -12,8 +12,14 @@ export const SimpleViewer: React.FC<SimpleViewerProps> = ({ onBack }) => {
 
   // Use headless hook with plain viewing configuration
   // All visual and interaction options are controllable: grid, axes, colors, shape fills, interactivity
-  const { containerRef, currentTool, setCurrentTool, measureText, error } =
-    useDxfViewer({
+  const {
+    containerRef,
+    currentTool,
+    setCurrentTool,
+    measureText,
+    frameStats,
+    error,
+  } = useDxfViewer({
       dxfContent,
       showGrid: false, // Disable grid for clean viewing
       showAxes: false, // Disable axes for minimal interface
@@ -24,6 +30,7 @@ export const SimpleViewer: React.FC<SimpleViewerProps> = ({ onBack }) => {
       width: "100%",
       height: "100%",
       defaultTool: "pan",
+      showStats: true,
     });
 
   useEffect(() => {
@@ -60,6 +67,9 @@ export const SimpleViewer: React.FC<SimpleViewerProps> = ({ onBack }) => {
 
       <div className="simple-canvas-wrapper">
         <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
+
+        {/* Headless composition: the hook measures, this renders it. */}
+        <StatsOverlay stats={frameStats} position="top-left" />
 
         {/* Floating Minimal Toolbar */}
         <div className="simple-floating-toolbar">

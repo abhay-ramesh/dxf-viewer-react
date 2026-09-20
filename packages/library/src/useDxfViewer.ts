@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { DxfViewerCore } from "./core/DxfViewerCore";
+import { FrameStats } from "./core/PerformanceMonitor";
 import { StyleResolver } from "./style/StyleResolver";
 import { DxfDocument } from "./document/DxfDocument";
 import { processDxf } from "./processDxf";
@@ -28,6 +29,7 @@ export const useDxfViewer = ({
   showShapeColors = true,
   shapeColors,
   interactive = true,
+  showStats = false,
   defaultTool = "pan",
   onLoad,
   onError,
@@ -48,6 +50,7 @@ export const useDxfViewer = ({
     y: number;
   } | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [frameStats, setFrameStats] = useState<FrameStats | null>(null);
   const [measureText, setMeasureText] = useState<string | null>(null);
   const [stats, setStats] = useState<Record<string, number | string>>({});
   const [analyzedData, setAnalyzedData] = useState<AnalyzedData | null>(null);
@@ -204,6 +207,21 @@ export const useDxfViewer = ({
     };
   }, [core]);
 
+  // Frame statistics are opt-in: reading renderer.info every frame and
+  // pushing it into React is a cost the common case should not pay.
+  useEffect(() => {
+    if (!core || !showStats) {
+      setFrameStats(null);
+      return;
+    }
+    const off = core.on("stats:frame", setFrameStats);
+    const stop = core.startMonitoring();
+    return () => {
+      off();
+      stop();
+    };
+  }, [core, showStats]);
+
   // Analysis is independent of rendering; it reads the parsed entities.
   useEffect(() => {
     if (!dxfContent || !processed.entities.length) {
@@ -248,6 +266,8 @@ export const useDxfViewer = ({
     selection: core?.selection ?? null,
     measureText,
     stats,
+    /** Live frame timing and renderer counters, when showStats is on. */
+    frameStats,
     analyzedData,
     error,
     layers,

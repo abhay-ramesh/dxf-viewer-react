@@ -62,6 +62,8 @@ export interface DxfViewerProps {
   showGrid?: boolean;
   /** Show axes helper (default: true) */
   showAxes?: boolean;
+  /** Show a live frame-rate and renderer-counter overlay (default: false) */
+  showStats?: boolean;
   /** Show debug information overlay (default: false) */
   showDebugInfo?: boolean;
   /** Show debug (default: false) */
