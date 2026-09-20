@@ -51,6 +51,14 @@
             "import": "./dist/react.mjs",
             "require": "./dist/react.cjs"
         },
+        "./element": {
+            "types": {
+                "import": "./dist/element.d.mts",
+                "require": "./dist/element.d.cts"
+            },
+            "import": "./dist/element.mjs",
+            "require": "./dist/element.cjs"
+        },
         "./registry/*": {
             "import": "./src/registry/*"
         }

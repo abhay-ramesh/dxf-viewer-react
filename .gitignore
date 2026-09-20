@@ -25,3 +25,6 @@ dist-ssr
 
 # Conductor machine-local overrides (shared config lives in .conductor/settings.toml)
 .conductor/settings.local.toml
+
+# Built library copied in for the no-framework demo page
+packages/demo/public/lib/

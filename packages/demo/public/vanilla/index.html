@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>dxf-viewer — no framework</title>
+    <style>
+      body { margin: 0; font: 14px system-ui, sans-serif; }
+      header { display: flex; gap: .5rem; align-items: center;
+               padding: .75rem 1rem; border-bottom: 1px solid #e5e5e5; }
+      dxf-viewer { display: block; height: calc(100vh - 57px); }
+      button { padding: .375rem .75rem; border: 1px solid #ddd;
+               border-radius: 6px; background: #fff; cursor: pointer; font: inherit; }
+      #status { margin-left: auto; color: #666; font-variant-numeric: tabular-nums; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <strong>No framework</strong>
+      <button onclick="viewer.setAttribute('tool','pan')">Pan</button>
+      <button onclick="viewer.setAttribute('tool','select')">Select</button>
+      <button onclick="viewer.setAttribute('tool','measure')">Measure</button>
+      <button onclick="viewer.fit()">Fit</button>
+      <button onclick="share()">Copy view link</button>
+      <span id="status">loading…</span>
+    </header>
+
+    <dxf-viewer id="viewer" src="/test.dxf" background="#ffffff"
+                entity-color="#333333" grid="false" axes="false"></dxf-viewer>
+
+    <!-- three is a peer dependency, so a no-build page maps it itself. -->
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://esm.sh/three@0.160.0",
+          "three/": "https://esm.sh/three@0.160.0/"
+        }
+      }
+    </script>
+
+    <script type="module">
+      // No React, no build step, no framework: one import and a tag.
+      import { defineDxfViewerElement } from "/lib/element.mjs";
+      defineDxfViewerElement();
+
+      const status = document.getElementById("status");
+      viewer.addEventListener("dxf-load", (e) => {
+        status.textContent =
+          `${e.detail.entities} entities` +
+          (e.detail.omitted ? ` — ${e.detail.omitted}` : "");
+      });
+      viewer.addEventListener("dxf-select", (e) => {
+        const info = e.detail.info;
+        status.textContent = info
+          ? `${info.type} on ${info.layer}` +
+            (info.length ? ` — length ${info.length.toFixed(2)}` : "")
+          : "nothing selected";
+      });
+      viewer.addEventListener("dxf-measure", (e) => {
+        status.textContent = `measured ${e.detail.distance.toFixed(2)}`;
+      });
+
+      // The view state is a string, so a link can carry it.
+      window.share = () => {
+        location.hash = encodeURIComponent(viewer.viewState);
+        status.textContent = "view link in the address bar";
+      };
+      if (location.hash) {
+        viewer.addEventListener("dxf-load", () => {
+          viewer.viewState = decodeURIComponent(location.hash.slice(1));
+        }, { once: true });
+      }
+    </script>
+  </body>
+</html>

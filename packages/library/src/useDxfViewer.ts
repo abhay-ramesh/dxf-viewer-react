@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { DxfViewerCore } from "./core/DxfViewerCore";
 import { buildPartsReport, PartsReport } from "./analysis/PartsReport";
+import { ViewState } from "./core/ViewState";
 import { DrawingReport } from "./document/DrawingReport";
 import { Measurement } from "./core/MeasurementModel";
 import { FrameStats } from "./core/PerformanceMonitor";
@@ -328,6 +329,14 @@ export const useDxfViewer = ({
 
   const fitToContent = useCallback(() => core?.fitToContent(), [core]);
 
+  /** Capture everything the reader can see, for a link or a saved session. */
+  const captureView = useCallback(() => core?.captureView() ?? null, [core]);
+
+  const restoreView = useCallback(
+    (state: ViewState) => core?.restoreView(state),
+    [core]
+  );
+
   return {
     containerRef,
     currentTool,
@@ -358,6 +367,8 @@ export const useDxfViewer = ({
     toggleLayer,
     exportImage,
     fitToContent,
+    captureView,
+    restoreView,
     /** The viewer itself. Register a tool, subscribe to an event, drive it. */
     core,
     /** Queryable model of the drawing: identity, derived geometry, lookups. */

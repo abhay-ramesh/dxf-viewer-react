@@ -45,6 +45,13 @@ export {
 } from "./core/MeasurementModel";
 export type { Measurement, MeasurementPoint } from "./core/MeasurementModel";
 export { MeasurementRenderer } from "./core/MeasurementRenderer";
+export {
+  captureViewState,
+  encodeViewState,
+  decodeViewState,
+  VIEW_STATE_VERSION,
+} from "./core/ViewState";
+export type { ViewState, CameraState } from "./core/ViewState";
 export { PointIndex } from "./utils/PointIndex";
 export type { ViewerEventName, ViewerEvents } from "./core/events";
 

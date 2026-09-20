@@ -10,6 +10,7 @@ import { MeasurementModel } from "./MeasurementModel";
 import { MeasurementRenderer } from "./MeasurementRenderer";
 import { SelectionModel } from "./SelectionModel";
 import { SnapService } from "./SnapService";
+import { captureViewState, ViewState } from "./ViewState";
 import { Tool, ToolContext, ToolType } from "../tools/types";
 import { WheelBehavior } from "./gestures";
 import { Emitter, ViewerEventName, ViewerEvents } from "./events";
@@ -540,6 +541,60 @@ export class DxfViewerCore {
 
   emit<K extends ViewerEventName>(event: K, payload: ViewerEvents[K]): void {
     this.emitter.emit(event, payload);
+  }
+
+  // ------------------------------------------------------------ view state
+
+  /**
+   * Everything the reader can see, as plain data.
+   *
+   * Stored in document coordinates and as a visible extent, so restoring it
+   * on a different-sized screen frames the same part of the drawing.
+   */
+  captureView(): ViewState {
+    return captureViewState({
+      camera: this.camera,
+      documentOffset: this.document.worldOffset,
+      hiddenLayers: Object.keys(this.layerGroups).filter(
+        (layer) => !this.isLayerVisible(layer)
+      ),
+      selection: this.selection.ids,
+      measurements: [...this.measurements.all],
+      tool: this.currentTool,
+    });
+  }
+
+  /** Put the viewer back the way a captured state describes. */
+  restoreView(state: ViewState): void {
+    if (this.disposed) return;
+
+    const { width, height } = this.viewportSize();
+    const aspect = width / height;
+    const extent = state.camera.extent;
+
+    this.camera.top = extent;
+    this.camera.bottom = -extent;
+    this.camera.left = -extent * aspect;
+    this.camera.right = extent * aspect;
+    this.camera.zoom = 1;
+    this.camera.position.set(
+      state.camera.x + this.document.worldOffset.x,
+      state.camera.y + this.document.worldOffset.y,
+      100
+    );
+    this.camera.updateProjectionMatrix();
+    this.camera.updateMatrixWorld();
+
+    for (const layer of Object.keys(this.layerGroups)) {
+      this.setLayerVisibility(layer, !state.hiddenLayers.includes(layer));
+    }
+
+    this.selection.set(state.selection);
+    this.measurements.load(state.measurements);
+    if (state.tool) this.setTool(state.tool);
+
+    this.emitter.emit("camera:change", {});
+    this.invalidate();
   }
 
   // ------------------------------------------------------------ monitoring

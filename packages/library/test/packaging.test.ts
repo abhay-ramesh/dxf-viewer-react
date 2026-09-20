@@ -44,6 +44,13 @@ describe.skipIf(!built)("packaging", () => {
     expect(imports.some((name) => name === "three")).toBe(true);
   });
 
+  it("serves the custom element without React either", () => {
+    // `<dxf-viewer>` exists so Vue, Svelte, Angular and plain HTML are all
+    // covered by one artifact; pulling React in would defeat that.
+    const imports = bareImports(moduleGraph("element.mjs"));
+    expect(imports.filter((name) => name.startsWith("react"))).toEqual([]);
+  });
+
   it("keeps React in the /react entry, where it belongs", () => {
     const imports = bareImports(moduleGraph("react.mjs"));
     expect(imports.some((name) => name.startsWith("react"))).toBe(true);
@@ -64,7 +71,7 @@ describe.skipIf(!built)("packaging", () => {
       readFileSync(join(import.meta.dir, "..", "package.json"), "utf8")
     );
     expect(Object.keys(manifest.exports)).toEqual(
-      expect.arrayContaining([".", "./core", "./react"])
+      expect.arrayContaining([".", "./core", "./react", "./element"])
     );
   });
 });
