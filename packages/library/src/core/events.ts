@@ -1,5 +1,6 @@
 import { EntityId } from "../document/types";
 import { EntityInfo } from "../types";
+import { Measurement } from "./MeasurementModel";
 import { FrameStats } from "./PerformanceMonitor";
 
 /**
@@ -16,6 +17,8 @@ export interface ViewerEvents {
   "hover:change": { id: EntityId | null; info: EntityInfo | null; x: number; y: number };
   "measure:update": { distance: number | null; text: string | null };
   "measure:complete": { distance: number; text: string };
+  /** The recorded set changed: added, removed, undone or cleared. */
+  "measure:change": { measurements: Measurement[] };
   "tool:change": { tool: string };
   "camera:change": Record<string, never>;
   "layers:change": Record<string, never>;

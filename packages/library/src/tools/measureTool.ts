@@ -1,353 +1,179 @@
 import * as THREE from "three";
-import { SnapPoint } from "../types";
-import { SnappingUtils } from "../utils/SnappingUtils";
+import { formatMeasurement } from "../core/MeasurementModel";
+import { SnapType } from "../types";
 import { Tool, ToolContext } from "./types";
 
+/** Screen-space snap radius. Pixels, because that is what the user aims in. */
+const SNAP_PIXELS = 12;
+
+const SNAP_COLORS: Record<SnapType, number> = {
+  endpoint: 0xff0000,
+  midpoint: 0x00ffff,
+  center: 0xffff00,
+  quadrant: 0xff00ff,
+  intersection: 0x00ff00,
+  nearest: 0xaaaaaa,
+};
+
+/**
+ * Place two points and record the distance between them.
+ *
+ * The tool used to own snapping, the rendered line, the formatted string and
+ * the single pair of points that the next measurement overwrote — and it
+ * erased its own result after two seconds, because the drawing *was* the
+ * state. It now reads the shared snap service, writes a record to the
+ * measurement model, and lets the renderer draw whatever the model holds.
+ */
 export class MeasureTool implements Tool {
   type = "measure" as const;
-  private points: THREE.Vector3[] = [];
-  private measureLine: THREE.Line | null = null;
-  private tempLine: THREE.Line | null = null;
+
   private raycaster = new THREE.Raycaster();
-  private snapDistance = 5;
-  private snapIndicator: THREE.Mesh | null = null;
-  private startPoint: THREE.Mesh | null = null;
-  private endPoint: THREE.Mesh | null = null;
-  private measureText: THREE.Sprite | null = null;
-  private lineMaterial = new THREE.LineBasicMaterial({
-    color: 0xff0000,
-    linewidth: 2,
-    depthTest: false,
-  });
-  private tempLineMaterial = new THREE.LineBasicMaterial({
-    color: 0xff0000,
-    opacity: 0.5,
-    transparent: true,
-    linewidth: 1,
-    depthTest: false,
-  });
-  private pointMaterial = new THREE.MeshBasicMaterial({
-    color: 0xff0000,
-    depthTest: false,
-  });
-  private snapMaterial = new THREE.MeshBasicMaterial({
-    color: 0x00ff00,
-    opacity: 0.7,
-    transparent: true,
-    depthTest: false,
-  });
+  private plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+
+  private anchor: THREE.Vector3 | null = null;
+  private anchorSnap: SnapType | undefined;
+
+  private indicator: THREE.Mesh;
 
   constructor(
     private onMeasureComplete?: (distance: number) => void,
-    private onMeasureUpdate?: (
-      distance: number | null,
-      x: number,
-      y: number
-    ) => void,
+    private onMeasureUpdate?: (distance: number | null) => void,
     private onMeasureDisplay?: (text: string | null) => void
   ) {
-    // Create snap indicator - small sphere for precise point indication
-    const snapGeometry = new THREE.SphereGeometry(0.3, 16, 16);
-    this.snapIndicator = new THREE.Mesh(snapGeometry, this.snapMaterial);
-    this.snapIndicator.visible = false;
-    this.snapIndicator.renderOrder = 999;
-
-    // Create point indicators - larger spheres for start/end points
-    const pointGeometry = new THREE.SphereGeometry(0.5, 16, 16);
-    this.startPoint = new THREE.Mesh(pointGeometry, this.pointMaterial);
-    this.endPoint = new THREE.Mesh(pointGeometry, this.pointMaterial);
-    this.startPoint.visible = false;
-    this.endPoint.visible = false;
-    this.startPoint.renderOrder = 998;
-    this.endPoint.renderOrder = 998;
+    this.indicator = new THREE.Mesh(
+      new THREE.SphereGeometry(0.4, 12, 12),
+      new THREE.MeshBasicMaterial({
+        color: 0x00ff00,
+        transparent: true,
+        opacity: 0.8,
+        depthTest: false,
+      })
+    );
+    this.indicator.visible = false;
+    this.indicator.renderOrder = 1000;
   }
 
   activate({ controls, scene }: ToolContext) {
     controls.enablePan = false;
     controls.enableRotate = false;
     controls.mouseButtons.LEFT = null;
-
-    // Add visual elements to scene
-    if (this.snapIndicator) scene.add(this.snapIndicator);
-    if (this.startPoint) scene.add(this.startPoint);
-    if (this.endPoint) scene.add(this.endPoint);
-
-    // Reset state
-    this.points = [];
-    this.clearMeasurement(scene);
+    scene.add(this.indicator);
+    this.reset();
   }
 
-  deactivate({ controls, scene }: ToolContext) {
+  deactivate({ controls, scene, measurements }: ToolContext) {
     controls.enablePan = false;
     controls.mouseButtons.LEFT = null;
-
-    // Clean up
-    this.clearMeasurement(scene);
-    this.points = [];
-
-    if (this.snapIndicator) {
-      scene.remove(this.snapIndicator);
-    }
-    if (this.startPoint) {
-      scene.remove(this.startPoint);
-    }
-    if (this.endPoint) {
-      scene.remove(this.endPoint);
-    }
-
-    // Clean up snap points
-    this.snapPoints.forEach((point) => scene.remove(point));
-    this.snapPoints = [];
-
-    this.onMeasureUpdate?.(null, 0, 0);
-    this.updateMeasurement(null);
-  }
-
-  private clearMeasurement(scene: THREE.Scene) {
-    if (this.measureLine) {
-      scene.remove(this.measureLine);
-      this.measureLine = null;
-    }
-    if (this.tempLine) {
-      scene.remove(this.tempLine);
-      this.tempLine = null;
-    }
-    if (this.measureText) {
-      scene.remove(this.measureText);
-      this.measureText = null;
-    }
-    if (this.startPoint) this.startPoint.visible = false;
-    if (this.endPoint) this.endPoint.visible = false;
-  }
-
-  private findNearestPoint(group: THREE.Group): SnapPoint | null {
-    // Collect all objects in the group
-    const objects: THREE.Object3D[] = [];
-    group.traverse((obj) => {
-      if (
-        obj instanceof THREE.Line ||
-        (obj.userData &&
-          (obj.userData.entityType === "CIRCLE" ||
-            obj.userData.entityType === "ARC"))
-      ) {
-        objects.push(obj);
-      }
-    });
-
-    return SnappingUtils.getSnapPoint(
-      this.raycaster,
-      objects,
-      this.snapDistance
+    scene.remove(this.indicator);
+    this.reset();
+    this.onMeasureDisplay?.(
+      measurements.last ? formatMeasurement(measurements.last) : null
     );
   }
 
-  // private createMeasurementText(
-  //   distance: number,
-  //   midPoint: THREE.Vector3
-  // ): THREE.Sprite {
-  //   const canvas = document.createElement("canvas");
-  //   const context = canvas.getContext("2d")!;
-  //   canvas.width = 128;
-  //   canvas.height = 32;
+  private reset(): void {
+    this.anchor = null;
+    this.anchorSnap = undefined;
+    this.indicator.visible = false;
+  }
 
-  //   // Draw text
-  //   context.fillStyle = "rgba(0, 0, 0, 0.8)";
-  //   context.fillRect(0, 0, canvas.width, canvas.height);
-  //   context.font = "bold 16px Arial";
-  //   context.fillStyle = "white";
-  //   context.textAlign = "center";
-  //   context.textBaseline = "middle";
-  //   context.fillText(
-  //     `${distance.toFixed(2)} units`,
-  //     canvas.width / 2,
-  //     canvas.height / 2
-  //   );
+  /** Where the cursor is on the drawing plane, snapped if anything is close. */
+  private resolvePoint(
+    event: MouseEvent,
+    context: ToolContext
+  ): { point: THREE.Vector3; snappedTo?: SnapType } {
+    const { camera, renderer, snapping, viewportHeight } = context;
+    const rect = renderer.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(
+      ((event.clientX - rect.left) / rect.width) * 2 - 1,
+      -((event.clientY - rect.top) / rect.height) * 2 + 1
+    );
 
-  //   // Create sprite
-  //   const texture = new THREE.CanvasTexture(canvas);
-  //   const spriteMaterial = new THREE.SpriteMaterial({
-  //     map: texture,
-  //     depthTest: false,
-  //     sizeAttenuation: false,
-  //   });
-  //   const sprite = new THREE.Sprite(spriteMaterial);
-  //   sprite.position.copy(midPoint);
-  //   sprite.scale.set(1, 0.25, 1);
-  //   sprite.renderOrder = 1000;
+    this.raycaster.setFromCamera(ndc, camera);
+    const onPlane = new THREE.Vector3();
+    this.raycaster.ray.intersectPlane(this.plane, onPlane);
 
-  //   return sprite;
-  // }
+    const tolerance = snapping.worldTolerance(
+      camera,
+      viewportHeight,
+      SNAP_PIXELS
+    );
+    const snap = snapping.snap(onPlane, tolerance);
+    if (!snap) return { point: onPlane };
+    return { point: snap.point.clone(), snappedTo: snap.type };
+  }
 
-  private snapPoints: THREE.Mesh[] = [];
+  /** Shift constrains the run to horizontal or vertical, as CAD ortho does. */
+  private constrain(from: THREE.Vector3, to: THREE.Vector3): THREE.Vector3 {
+    const constrained = to.clone();
+    if (Math.abs(to.x - from.x) > Math.abs(to.y - from.y)) {
+      constrained.y = from.y;
+    } else {
+      constrained.x = from.x;
+    }
+    return constrained;
+  }
 
-  private updateMeasurement(distance: number | null) {
-    if (distance === null) {
-      this.onMeasureDisplay?.(null);
+  onMouseMove(event: MouseEvent, context: ToolContext) {
+    const { point, snappedTo } = this.resolvePoint(event, context);
+    const current =
+      event.shiftKey && this.anchor
+        ? this.constrain(this.anchor, point)
+        : point;
+
+    this.indicator.position.copy(current);
+    this.indicator.visible = true;
+    const material = this.indicator.material as THREE.MeshBasicMaterial;
+    material.color.setHex(snappedTo ? SNAP_COLORS[snappedTo] : 0x00ff00);
+    material.opacity = snappedTo ? 1 : 0.5;
+
+    if (!this.anchor) {
+      context.renderer.domElement.style.cursor = "crosshair";
       return;
     }
-    const text = `Distance: ${distance.toFixed(2)} units`;
-    this.onMeasureDisplay?.(text);
+
+    context.measurementRenderer?.setPending(this.anchor, current);
+    const distance = this.anchor.distanceTo(current);
+    this.onMeasureUpdate?.(distance);
+    this.onMeasureDisplay?.(distance.toFixed(2));
   }
 
-  private constrainTo90Degrees(
-    start: THREE.Vector3,
-    end: THREE.Vector3
-  ): THREE.Vector3 {
-    const delta = new THREE.Vector3().subVectors(end, start);
-    const absX = Math.abs(delta.x);
-    const absY = Math.abs(delta.y);
+  onMouseDown(event: MouseEvent, context: ToolContext) {
+    const { point, snappedTo } = this.resolvePoint(event, context);
 
-    // Determine which direction (x or y) has the larger change
-    const constrainedPoint = new THREE.Vector3().copy(start);
-    if (absX > absY) {
-      // Constrain to horizontal
-      constrainedPoint.x = end.x;
-    } else {
-      // Constrain to vertical
-      constrainedPoint.y = end.y;
+    if (!this.anchor) {
+      this.anchor = point;
+      this.anchorSnap = snappedTo;
+      return;
     }
-    return constrainedPoint;
+
+    const end = event.shiftKey ? this.constrain(this.anchor, point) : point;
+    const measurement = context.measurements.addFromWorld(
+      context.document,
+      this.anchor,
+      end,
+      { from: this.anchorSnap, to: snappedTo }
+    );
+
+    context.measurementRenderer?.setPending(null, null);
+    this.reset();
+
+    this.onMeasureComplete?.(measurement.distance);
+    this.onMeasureUpdate?.(measurement.distance);
+    this.onMeasureDisplay?.(formatMeasurement(measurement));
   }
 
-  onMouseMove(
-    event: MouseEvent,
-    { camera, renderer, scene, group }: ToolContext
-  ) {
-    const rect = renderer.domElement.getBoundingClientRect();
-    const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-    const y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-
-    this.raycaster.setFromCamera(new THREE.Vector2(x, y), camera);
-    const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
-    const intersectPoint = new THREE.Vector3();
-    this.raycaster.ray.intersectPlane(plane, intersectPoint);
-
-    // Find nearest snap point
-    const snapResult = this.findNearestPoint(group);
-    let currentPoint = snapResult ? snapResult.point : intersectPoint;
-
-    // If shift is pressed and we have a start point, constrain to 90 degrees
-    if (event.shiftKey && this.points.length === 1) {
-      currentPoint = this.constrainTo90Degrees(this.points[0], currentPoint);
+  /** Escape abandons a half-placed measurement; Backspace undoes the last. */
+  onKeyDown(event: KeyboardEvent, context: ToolContext) {
+    if (event.key === "Escape") {
+      context.measurementRenderer?.setPending(null, null);
+      this.reset();
+      this.onMeasureDisplay?.(null);
     }
-
-    // Update snap indicator
-    if (this.snapIndicator) {
-      this.snapIndicator.position.copy(currentPoint);
-      this.snapIndicator.visible = true;
-      if (this.snapIndicator.material instanceof THREE.MeshBasicMaterial) {
-        // Change color based on snap type if snapped
-        if (snapResult) {
-          this.snapIndicator.material.opacity = 1.0;
-          switch (snapResult.type) {
-            case "endpoint":
-              this.snapIndicator.material.color.setHex(0xff0000);
-              break; // Red for Endpoint
-            case "midpoint":
-              this.snapIndicator.material.color.setHex(0x00ffff);
-              break; // Cyan for Midpoint
-            case "center":
-              this.snapIndicator.material.color.setHex(0xffff00);
-              break; // Yellow for Center
-            case "quadrant":
-              this.snapIndicator.material.color.setHex(0xff00ff);
-              break; // Magenta for Quadrant
-            case "intersection":
-              this.snapIndicator.material.color.setHex(0x00ff00);
-              break; // Green for Intersection
-            case "nearest":
-              this.snapIndicator.material.color.setHex(0xaaaaaa);
-              break; // Grey for Nearest
-            default:
-              this.snapIndicator.material.color.setHex(0x00ff00);
-          }
-        } else {
-          this.snapIndicator.material.opacity = 0.5;
-          this.snapIndicator.material.color.setHex(0x00ff00);
-        }
-      }
-    }
-
-    // Update temporary line if we have a start point
-    if (this.points.length === 1) {
-      const linePoints = [this.points[0], currentPoint];
-      const geometry = new THREE.BufferGeometry().setFromPoints(linePoints);
-
-      if (this.tempLine) {
-        scene.remove(this.tempLine);
-      }
-
-      this.tempLine = new THREE.Line(geometry, this.tempLineMaterial);
-      scene.add(this.tempLine);
-
-      // Calculate and display current distance
-      const distance = this.points[0].distanceTo(currentPoint);
-      this.updateMeasurement(distance);
-    }
-  }
-
-  onMouseDown(
-    event: MouseEvent,
-    { camera, renderer, scene, group }: ToolContext
-  ) {
-    const rect = renderer.domElement.getBoundingClientRect();
-    const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-    const y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-
-    this.raycaster.setFromCamera(new THREE.Vector2(x, y), camera);
-    const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
-    const intersectPoint = new THREE.Vector3();
-    this.raycaster.ray.intersectPlane(plane, intersectPoint);
-
-    // Use snapped point if available
-    const snapResult = this.findNearestPoint(group);
-    let point = snapResult ? snapResult.point : intersectPoint;
-
-    // If shift is pressed and we have a start point, constrain to 90 degrees
-    if (event.shiftKey && this.points.length === 1) {
-      point = this.constrainTo90Degrees(this.points[0], point);
-    }
-
-    this.points.push(point);
-
-    if (this.points.length === 1) {
-      // First point - show start indicator
-      if (this.startPoint) {
-        this.startPoint.position.copy(point);
-        this.startPoint.visible = true;
-      }
-    } else if (this.points.length === 2) {
-      // Second point - create final measurement
-      if (this.endPoint) {
-        this.endPoint.position.copy(point);
-        this.endPoint.visible = true;
-      }
-
-      // Create or update measurement line
-      const geometry = new THREE.BufferGeometry().setFromPoints(this.points);
-
-      if (this.measureLine) {
-        scene.remove(this.measureLine);
-      }
-      if (this.tempLine) {
-        scene.remove(this.tempLine);
-        this.tempLine = null;
-      }
-
-      this.measureLine = new THREE.Line(geometry, this.lineMaterial);
-      scene.add(this.measureLine);
-
-      // Calculate and report distance
-      const distance = this.points[0].distanceTo(this.points[1]);
-      this.onMeasureComplete?.(distance);
-      this.updateMeasurement(distance);
-
-      // Reset points for next measurement after a short delay
-      setTimeout(() => {
-        this.clearMeasurement(scene);
-        this.points = [];
-        this.updateMeasurement(null);
-      }, 2000);
+    if (event.key === "Backspace" || event.key === "Delete") {
+      context.measurements.undo();
+      const last = context.measurements.last;
+      this.onMeasureDisplay?.(last ? formatMeasurement(last) : null);
     }
   }
 }

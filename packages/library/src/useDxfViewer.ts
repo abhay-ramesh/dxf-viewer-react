@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { DxfViewerCore } from "./core/DxfViewerCore";
+import { Measurement } from "./core/MeasurementModel";
 import { FrameStats } from "./core/PerformanceMonitor";
 import { StyleResolver } from "./style/StyleResolver";
 import { DxfDocument } from "./document/DxfDocument";
@@ -58,6 +59,7 @@ export const useDxfViewer = ({
   const [isLoading, setIsLoading] = useState(false);
   const [progress, setProgress] = useState<LoadProgress | null>(null);
   const [measureText, setMeasureText] = useState<string | null>(null);
+  const [measurements, setMeasurements] = useState<Measurement[]>([]);
   const [stats, setStats] = useState<Record<string, number | string>>({});
   const [analyzedData, setAnalyzedData] = useState<AnalyzedData | null>(null);
   const [layers, setLayers] = useState<LayerInfo[]>([]);
@@ -222,6 +224,9 @@ export const useDxfViewer = ({
     const offSelection = core.on("selection:change", ({ ids }) =>
       setSelectedIds(ids)
     );
+    const offMeasure = core.on("measure:change", (payload) =>
+      setMeasurements(payload.measurements)
+    );
     const offLayers = core.on("layers:change", () => {
       setLayers((previous) =>
         previous.map((layer) => ({
@@ -233,6 +238,7 @@ export const useDxfViewer = ({
     return () => {
       offLoaded();
       offSelection();
+      offMeasure();
       offLayers();
     };
   }, [core]);
@@ -295,6 +301,12 @@ export const useDxfViewer = ({
     /** Select, extend, clear or select-by-layer, programmatically. */
     selection: core?.selection ?? null,
     measureText,
+    /** Every recorded measurement, in drawing coordinates and with units. */
+    measurements,
+    /** Add, remove, undo, clear or serialise measurements. */
+    measurementModel: core?.measurements ?? null,
+    /** Zoom-aware snapping, shared by every precision feature. */
+    snapping: core?.snapping ?? null,
     stats,
     /** Live frame timing and renderer counters, when showStats is on. */
     frameStats,

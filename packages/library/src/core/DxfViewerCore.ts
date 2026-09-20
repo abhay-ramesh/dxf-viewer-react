@@ -5,7 +5,10 @@ import { EntityId } from "../document/types";
 import { ProcessDxfResult } from "../processDxf";
 import { setupControls } from "../setupControls";
 import { StyleResolver } from "../style/StyleResolver";
+import { MeasurementModel } from "./MeasurementModel";
+import { MeasurementRenderer } from "./MeasurementRenderer";
 import { SelectionModel } from "./SelectionModel";
+import { SnapService } from "./SnapService";
 import { Tool, ToolContext, ToolType } from "../tools/types";
 import { Emitter, ViewerEventName, ViewerEvents } from "./events";
 import { FrameStats, PerformanceMonitor } from "./PerformanceMonitor";
@@ -72,6 +75,11 @@ export class DxfViewerCore {
 
   /** What is selected and hovered, as data rather than as swapped materials. */
   readonly selection: SelectionModel;
+  /** Significant points to snap to. Shared by every precision feature. */
+  readonly snapping = new SnapService();
+  /** Recorded measurements, in drawing coordinates and with units. */
+  readonly measurements: MeasurementModel;
+  private readonly measurementRenderer = new MeasurementRenderer();
   private style: StyleResolver;
 
   private readonly tools = new Map<string, Tool>();
@@ -87,6 +95,13 @@ export class DxfViewerCore {
   ) {
     this.options = { ...DEFAULTS, ...stripUndefined(options) };
     this.style = options.style ?? new StyleResolver();
+    this.measurements = new MeasurementModel(() => {
+      this.measurementRenderer.sync(this.measurements, this.document);
+      this.emitter.emit("measure:change", {
+        measurements: [...this.measurements.all],
+      });
+      this.invalidate();
+    });
     this.selection = new SelectionModel(this.document, this.style, () => {
       this.emitter.emit("selection:change", {
         ids: this.selection.ids,
@@ -114,6 +129,7 @@ export class DxfViewerCore {
     this.scene.add(this.helpers);
     this.contentGroup.name = "dxf-content-group";
     this.scene.add(this.contentGroup);
+    this.scene.add(this.measurementRenderer.group);
     this.applyHelperOptions();
 
     const viewSize = 40;
@@ -202,6 +218,12 @@ export class DxfViewerCore {
     this.document = result.document;
     this.layerGroups = result.layers;
     this.selection.retarget(this.document, this.style);
+    this.snapping.setDocument(this.document);
+    this.measurements.setUnits(
+      typeof result.stats.DXF_UNITS === "string"
+        ? result.stats.DXF_UNITS
+        : undefined
+    );
     this.scene.add(this.contentGroup);
 
     // Re-apply layer visibility the user had already chosen, and register any
@@ -354,6 +376,10 @@ export class DxfViewerCore {
       group: this.contentGroup,
       document: this.document,
       selection: this.selection,
+      snapping: this.snapping,
+      measurements: this.measurements,
+      measurementRenderer: this.measurementRenderer,
+      viewportHeight: this.viewportSize().height,
     };
   }
 
@@ -369,6 +395,20 @@ export class DxfViewerCore {
     canvas.addEventListener("mousedown", forward("onMouseDown"));
     canvas.addEventListener("mousemove", forward("onMouseMove"));
     canvas.addEventListener("mouseup", forward("onMouseUp"));
+
+    // Tools that accept keys (Escape to abandon, Backspace to undo) need the
+    // canvas focusable, or the events never arrive.
+    canvas.tabIndex = 0;
+    canvas.style.outline = "none";
+    const forwardKey =
+      (handler: "onKeyDown" | "onKeyUp") => (event: KeyboardEvent) => {
+        if (!this.activeTool || !this.options.interactive) return;
+        this.activeTool[handler]?.(event, this.toolContext());
+        this.invalidate();
+      };
+    canvas.addEventListener("keydown", forwardKey("onKeyDown"));
+    canvas.addEventListener("keyup", forwardKey("onKeyUp"));
+    canvas.addEventListener("mousedown", () => canvas.focus());
   }
 
   // ---------------------------------------------------------------- camera
@@ -537,6 +577,7 @@ export class DxfViewerCore {
     this.activeTool?.deactivate(this.toolContext());
     this.activeTool = null;
     this.controls.dispose();
+    this.measurementRenderer.dispose();
     this.emitter.clear();
 
     disposeSubtree(this.scene);

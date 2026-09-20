@@ -24,6 +24,15 @@ export { RenderScheduler } from "./core/RenderScheduler";
 export { PerformanceMonitor } from "./core/PerformanceMonitor";
 export type { FrameStats } from "./core/PerformanceMonitor";
 export { SelectionModel } from "./core/SelectionModel";
+export { SnapService } from "./core/SnapService";
+export type { SnapOptions } from "./core/SnapService";
+export {
+  MeasurementModel,
+  formatMeasurement,
+} from "./core/MeasurementModel";
+export type { Measurement, MeasurementPoint } from "./core/MeasurementModel";
+export { MeasurementRenderer } from "./core/MeasurementRenderer";
+export { PointIndex } from "./utils/PointIndex";
 export type { ViewerEventName, ViewerEvents } from "./core/events";
 
 // Style: one cascade for strokes, fills, hover, selection and theming.
