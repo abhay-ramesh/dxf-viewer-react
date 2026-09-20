@@ -1,6 +1,11 @@
 export { DxfViewer } from "./DxfViewer";
 export { useDxfViewer } from "./useDxfViewer";
-export type { DxfViewerProps } from "./types";
+export type {
+  AnalyzedData,
+  DxfViewerProps,
+  EntityInfo,
+  LayerInfo,
+} from "./types";
 
 // Document model: stable entity identity, derived geometry, and lookups.
 export { DxfDocument } from "./document/DxfDocument";

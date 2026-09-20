@@ -98,6 +98,14 @@ export interface EntityProcessorProps {
   material: THREE.Material;
 }
 
+/** Summary of a parsed drawing, independent of how it is rendered. */
+export interface AnalyzedData {
+  totalEntities: number;
+  entityTypes: Array<{ type: string; count: number | string }>;
+  closedLoops: unknown;
+  dxfHeader?: Record<string, unknown>;
+}
+
 export interface EntityStats {
   [key: string]: number;
 }

@@ -5,7 +5,7 @@ import { StyleResolver } from "./style/StyleResolver";
 import { DxfDocument } from "./document/DxfDocument";
 import { processDxf } from "./processDxf";
 import { MeasureTool, PanTool, SelectTool } from "./tools";
-import { DxfViewerProps, EntityInfo, LayerInfo } from "./types";
+import { AnalyzedData, DxfViewerProps, EntityInfo, LayerInfo } from "./types";
 import { DxfAnalyzer } from "./utils/DxfAnalyzer";
 
 /**
@@ -50,7 +50,7 @@ export const useDxfViewer = ({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [measureText, setMeasureText] = useState<string | null>(null);
   const [stats, setStats] = useState<Record<string, number | string>>({});
-  const [analyzedData, setAnalyzedData] = useState<unknown>(null);
+  const [analyzedData, setAnalyzedData] = useState<AnalyzedData | null>(null);
   const [layers, setLayers] = useState<LayerInfo[]>([]);
 
   // Callbacks live in a ref so a consumer passing inline arrow functions does
