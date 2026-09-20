@@ -12,13 +12,13 @@ This monorepo contains the `dxf-viewer-react` library and a demo application.
 1. **Install Dependencies**
 
    ```bash
-   pnpm install
+   bun install
    ```
 
 2. **Start Development Server**
 
    ```bash
-   pnpm dev
+   bun run dev
    ```
 
    This will start both the library build (in watch mode) and the demo application.

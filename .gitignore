@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Conductor machine-local overrides (shared config lives in .conductor/settings.toml)
+.conductor/settings.local.toml
