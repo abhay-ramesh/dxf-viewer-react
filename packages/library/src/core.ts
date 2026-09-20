@@ -76,6 +76,14 @@ export type {
   StyleSubject,
 } from "./style/types";
 
+// Text: a single-stroke font, so text batches and snaps like any geometry.
+export { glyphFor, measure, advanceFor, FONT_METRICS } from "./text/strokeFont";
+export type { Glyph } from "./text/strokeFont";
+export { decodeText, decodeMText, decodeEntityText } from "./text/decode";
+export type { DecodedText } from "./text/decode";
+export { layoutText, alignFromAttachment } from "./text/layout";
+export type { TextLayout, TextLayoutOptions } from "./text/layout";
+
 // Tools.
 export { MeasureTool, PanTool, SelectTool } from "./tools";
 export type { Tool, ToolContext, ToolType } from "./tools/types";

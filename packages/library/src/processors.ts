@@ -9,6 +9,12 @@ import {
   ITextEntity,
 } from "dxf-parser";
 import * as THREE from "three";
+import {
+  alignFromAttachment,
+  horizontalAlignFromCode,
+  layoutText,
+  verticalAlignFromCode,
+} from "./text/layout";
 
 export const processLine = (
   entity: ILineEntity,
@@ -281,53 +287,96 @@ export const processPoint = (
   return new THREE.LineSegments(geometry, material);
 };
 
+/**
+ * Draw a TEXT or MTEXT entity with the stroke font.
+ *
+ * This replaces an empty rectangle. The old implementation drew a box the
+ * approximate size of the string — which is worse than drawing nothing,
+ * because a reader sees a box and assumes the drawing contains one.
+ */
 export const processText = (
   entity: ITextEntity,
   material: THREE.Material
 ): THREE.Object3D | null => {
-  if (!entity.startPoint) return null;
+  const raw = (entity as { text?: string }).text ?? "";
+  if (!raw.trim()) return null;
 
-  const text = entity.text || "";
-  const height = entity.textHeight || 1;
-  const rotation = entity.rotation || 0;
+  const anchor =
+    entity.startPoint ??
+    (entity as { position?: { x: number; y: number; z?: number } }).position;
+  if (!anchor) return null;
 
-  // Create a simple line box to represent text bounds
-  const width = height * text.length * 0.6; // Approximate width based on height
+  const withText = entity as ITextEntity & {
+    textHeight?: number;
+    height?: number;
+    xScale?: number;
+    halign?: number;
+    valign?: number;
+    attachmentPoint?: number;
+    directionVector?: { x: number; y: number };
+  };
+
+  const height = withText.textHeight ?? withText.height ?? 1;
+  const rotation = resolveRotation(entity.rotation, withText.directionVector);
+
+  const alignment =
+    entity.type === "MTEXT"
+      ? alignFromAttachment(withText.attachmentPoint)
+      : {
+          horizontal: horizontalAlignFromCode(withText.halign),
+          vertical: verticalAlignFromCode(withText.valign),
+        };
+
+  // A TEXT entity aligned other than left uses its second point as the
+  // anchor, which is where AutoCAD actually places it.
+  const aligned =
+    entity.type !== "MTEXT" &&
+    withText.halign !== undefined &&
+    withText.halign !== 0 &&
+    entity.endPoint
+      ? entity.endPoint
+      : anchor;
+
+  const layout = layoutText({
+    text: raw,
+    type: entity.type,
+    height,
+    x: aligned.x,
+    y: aligned.y,
+    rotation,
+    widthFactor: withText.xScale || 1,
+    horizontalAlign: alignment.horizontal,
+    verticalAlign: alignment.vertical,
+  });
+
+  if (!layout.segments.length) return null;
+
+  const positions = new Float32Array((layout.segments.length / 2) * 3);
+  for (let i = 0, v = 0; i < layout.segments.length; i += 2, v += 3) {
+    positions[v] = layout.segments[i];
+    positions[v + 1] = layout.segments[i + 1];
+    positions[v + 2] = anchor.z ?? 0;
+  }
+
   const geometry = new THREE.BufferGeometry();
-  const cos = Math.cos(rotation);
-  const sin = Math.sin(rotation);
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
 
-  const vertices = new Float32Array([
-    // Bottom line
-    entity.startPoint.x,
-    entity.startPoint.y,
-    entity.startPoint.z || 0,
-    entity.startPoint.x + width * cos,
-    entity.startPoint.y + width * sin,
-    entity.startPoint.z || 0,
-    // Right line
-    entity.startPoint.x + width * cos,
-    entity.startPoint.y + width * sin,
-    entity.startPoint.z || 0,
-    entity.startPoint.x + width * cos - height * sin,
-    entity.startPoint.y + width * sin + height * cos,
-    entity.startPoint.z || 0,
-    // Top line
-    entity.startPoint.x + width * cos - height * sin,
-    entity.startPoint.y + width * sin + height * cos,
-    entity.startPoint.z || 0,
-    entity.startPoint.x - height * sin,
-    entity.startPoint.y + height * cos,
-    entity.startPoint.z || 0,
-    // Left line
-    entity.startPoint.x - height * sin,
-    entity.startPoint.y + height * cos,
-    entity.startPoint.z || 0,
-    entity.startPoint.x,
-    entity.startPoint.y,
-    entity.startPoint.z || 0,
-  ]);
-
-  geometry.setAttribute("position", new THREE.BufferAttribute(vertices, 3));
-  return new THREE.LineSegments(geometry, material);
+  const object = new THREE.LineSegments(geometry, material);
+  object.userData.text = layout.lines.join("\n");
+  return object;
 };
+
+/**
+ * MTEXT states direction as a vector; TEXT states it as an angle in degrees.
+ */
+function resolveRotation(
+  degrees: number | undefined,
+  direction: { x: number; y: number } | undefined
+): number {
+  if (direction && (direction.x !== 0 || direction.y !== 0)) {
+    // The vector points along the text, and a near-vertical one is how
+    // dimension text records its own orientation.
+    return Math.atan2(direction.y, direction.x);
+  }
+  return ((degrees ?? 0) * Math.PI) / 180;
+}

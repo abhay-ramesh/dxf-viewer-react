@@ -63,6 +63,13 @@ export interface IndexedEntity {
   /** Position in the fill sequence, for palette-style shape colouring. */
   shapeIndex?: number;
   /**
+   * The decoded string, for TEXT and MTEXT.
+   *
+   * Kept on the entity rather than on the rendered object so it survives
+   * batching — and so the drawing's text is searchable.
+   */
+  text?: string;
+  /**
    * Where this entity's vertices live inside a shared batch buffer.
    *
    * Present when batching is on, which is what lets selection recolour one

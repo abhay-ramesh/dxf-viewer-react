@@ -1843,7 +1843,10 @@ export function processDxf(
           object.matrix.copy(parentMatrix);
 
           // User Data
+          // Merge rather than replace: a processor may already have recorded
+          // something only it knows, such as a text entity's decoded string.
           object.userData = {
+            ...object.userData,
             entityType: entity.type,
             isClosedLoop: closedLoopEntities.has(entity),
             loopId: entityLoopMap.get(entity),
@@ -1876,6 +1879,7 @@ export function processDxf(
             ),
             loopId: entityLoopMap.get(entity),
             blockName: parentBlockName,
+            text: object.userData.text as string | undefined,
           });
 
           layers[resolvedLayer].add(object);

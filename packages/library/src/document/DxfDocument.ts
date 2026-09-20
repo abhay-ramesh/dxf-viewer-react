@@ -68,6 +68,20 @@ export class DxfDocument {
     return this.entities.values();
   }
 
+  /**
+   * Every text entity whose string contains `query`, case-insensitively.
+   *
+   * Possible because the decoded string is kept on the entity: a reader can
+   * find the callout they are looking for instead of hunting the drawing.
+   */
+  findText(query: string): IndexedEntity[] {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return [];
+    return this.filter(
+      (entity) => !!entity.text && entity.text.toLowerCase().includes(needle)
+    );
+  }
+
   /** Every entity matching a predicate — the basis for select-by-type etc. */
   filter(predicate: (entity: IndexedEntity) => boolean): IndexedEntity[] {
     const out: IndexedEntity[] = [];
