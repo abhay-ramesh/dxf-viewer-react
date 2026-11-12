@@ -1,0 +1,127 @@
+name: Release
+
+# Publish dxf-viewer-react to npm when a GitHub release is published.
+#
+# How to release:
+#   1. Bump "version" in packages/library/package.json and merge to main.
+#   2. Create a GitHub release with tag v<version> (e.g. v0.3.0).
+#      Mark it as a pre-release for versions like 0.3.0-beta.1.
+#   3. Approve the staged version on npmjs.com (passkey/2FA).
+#
+# Security model:
+#   - npm trusted publishing (OIDC): no npm token is stored anywhere. npm must
+#     list abhay-ramesh/dxf-viewer-react + release.yml as the Trusted Publisher.
+#   - Staged publishing: CI can only STAGE the version. It goes public when a
+#     maintainer approves it on npmjs.com with 2FA (`npm stage approve`).
+#   - Dependencies are installed, tested and built in the `build` job, which
+#     has no publish permission. The `publish` job installs nothing and runs no
+#     package scripts; it only uploads the tarball produced by `build`.
+
+on:
+  release:
+    types: [published]
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Test, build and pack
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      tarball: ${{ steps.pack.outputs.tarball }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Check tag matches package version
+        id: version
+        working-directory: packages/library
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if [ "$TAG" != "v$VERSION" ]; then
+            echo "::error::Release tag $TAG does not match package version v$VERSION"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Test
+        working-directory: packages/library
+        run: bun test
+
+      - name: Build
+        working-directory: packages/library
+        run: bun run build
+
+      - name: Pack
+        id: pack
+        working-directory: packages/library
+        run: |
+          TARBALL=$(npm pack --ignore-scripts --silent)
+          echo "tarball=$TARBALL" >> "$GITHUB_OUTPUT"
+          npm pack --dry-run --ignore-scripts
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-package
+          path: packages/library/${{ steps.pack.outputs.tarball }}
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish to npm
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      id-token: write # npm trusted publishing (OIDC) and provenance
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: npm-package
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Use npm with trusted + staged publishing support
+        run: npm install -g npm@11.21.2 && npm --version # npm stage needs >= 11.21
+
+      - name: Publish
+        env:
+          TARBALL: ${{ needs.build.outputs.tarball }}
+          VERSION: ${{ needs.build.outputs.version }}
+          PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          if npm view "dxf-viewer-react@$VERSION" version >/dev/null 2>&1; then
+            echo "dxf-viewer-react@$VERSION is already on npm; nothing to do."
+            exit 0
+          fi
+          TAG=latest
+          if [ "$PRERELEASE" = "true" ] || [[ "$VERSION" == *-* ]]; then TAG=next; fi
+          npm stage publish "./$TARBALL" --access public --provenance --tag "$TAG" --ignore-scripts
+          {
+            echo "## 🔏 Staged on npm: approve to publish"
+            echo ""
+            echo "\`dxf-viewer-react@$VERSION\` (dist-tag \`$TAG\`) is staged, not public yet."
+            echo "Approve it with 2FA at https://www.npmjs.com/package/dxf-viewer-react"
+            echo "or run \`npm stage list dxf-viewer-react\` and \`npm stage approve <id>\`."
+          } >> "$GITHUB_STEP_SUMMARY"
