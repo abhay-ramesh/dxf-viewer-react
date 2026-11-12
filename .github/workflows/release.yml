@@ -6,10 +6,13 @@ name: Release
 #   1. Bump "version" in packages/library/package.json and merge to main.
 #   2. Create a GitHub release with tag v<version> (e.g. v0.3.0).
 #      Mark it as a pre-release for versions like 0.3.0-beta.1.
+#   3. Approve the staged version on npmjs.com (passkey/2FA).
 #
 # Security model:
 #   - npm trusted publishing (OIDC): no npm token is stored anywhere. npm must
 #     list abhay-ramesh/dxf-viewer-react + release.yml as the Trusted Publisher.
+#   - Staged publishing: CI can only STAGE the version. It goes public when a
+#     maintainer approves it on npmjs.com with 2FA (`npm stage approve`).
 #   - Dependencies are installed, tested and built in the `build` job, which
 #     has no publish permission. The `publish` job installs nothing and runs no
 #     package scripts; it only uploads the tarball produced by `build`.
@@ -99,8 +102,8 @@ jobs:
           node-version: 22
           registry-url: "https://registry.npmjs.org"
 
-      - name: Use npm with trusted publishing support
-        run: npm install -g npm@11.11.0 && npm --version
+      - name: Use npm with trusted + staged publishing support
+        run: npm install -g npm@11.21.2 && npm --version # npm stage needs >= 11.21
 
       - name: Publish
         env:
@@ -114,4 +117,11 @@ jobs:
           fi
           TAG=latest
           if [ "$PRERELEASE" = "true" ] || [[ "$VERSION" == *-* ]]; then TAG=next; fi
-          npm publish "./$TARBALL" --access public --provenance --tag "$TAG" --ignore-scripts
+          npm stage publish "./$TARBALL" --access public --provenance --tag "$TAG" --ignore-scripts
+          {
+            echo "## 🔏 Staged on npm: approve to publish"
+            echo ""
+            echo "\`dxf-viewer-react@$VERSION\` (dist-tag \`$TAG\`) is staged, not public yet."
+            echo "Approve it with 2FA at https://www.npmjs.com/package/dxf-viewer-react"
+            echo "or run \`npm stage list dxf-viewer-react\` and \`npm stage approve <id>\`."
+          } >> "$GITHUB_STEP_SUMMARY"
